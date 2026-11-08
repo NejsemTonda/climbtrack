@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}HC4 — evidence lezení{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="switch">
+      {% set on_lezik = request.path.startswith('/lezik') %}
+      <a href="{{ url_for('index') }}" class="{{ 'on brand' if not on_lezik }}">HC4</a>
+      <a href="{{ url_for('lezik_page') }}" class="{{ 'on primary' if on_lezik }}">◎ Lezík</a>
+    </div>
+  </header>
+
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% if msgs %}<div class="toasts">{% for cat, m in msgs %}<div class="toast {{ cat }}">{{ m }}</div>{% endfor %}</div>{% endif %}
+  {% endwith %}
+
+  <main>{% block content %}{% endblock %}</main>
+
+  {% set p = request.path %}
+  <nav class="bottombar">
+    <a href="{{ url_for('index') }}" class="{{ 'on krouzky' if p == '/' or p.startswith('/skupina') }}">▦ Kroužky</a>
+    <a href="{{ url_for('children_page') }}" class="{{ 'on deti' if p.startswith('/deti') }}">◍ Děti</a>
+    <a href="{{ url_for('routes_page') }}" class="{{ 'on cesty' if p.startswith('/cesty') }}">≡ Cesty</a>
+  </nav>
+</div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

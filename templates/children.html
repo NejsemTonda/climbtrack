@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "_macros.html" import avatar, level_chip %}
+{% block title %}Děti — HC4{% endblock %}
+{% block content %}
+<h1 class="pt4"><span class="ico deti-ico">◍</span> Všechny děti</h1>
+<input type="search" id="search" class="card mt3" placeholder="Hledat dítě…">
+
+<details class="filters mt3">
+  <summary class="item press filter-btn"><span class="count" id="filter-count"></span><span data-open="Skrýt filtry ▲" data-closed="Filtrovat ▼"></span></summary>
+  <div class="chips mt3" data-filter="day">
+    <button class="on" data-v="">Všechny dny</button>
+    {% for d in range(1, 5) %}<button data-v="{{ d }}">{{ WEEKDAYS_CS[d] }}</button>{% endfor %}
+  </div>
+  <div class="chips" data-filter="time">
+    <button class="on" data-v="">Všechny časy</button>
+    {% for s in SLOTS %}<button data-v="{{ s }}">od {{ s }}</button>{% endfor %}
+  </div>
+  <div class="chips" data-filter="level">
+    <button class="on" data-v="">Všechny úrovně</button>
+    {% for l in LEVELS %}<button data-v="{{ l }}" class="lvl-{{ level_class(l) }}">{{ l }}</button>{% endfor %}
+  </div>
+  <div class="chips" data-filter="sort">
+    <button class="on" data-v="">Podle jména</button>
+    <button data-v="-points">Nejvíc bodů</button>
+    <button data-v="points">Nejméně bodů</button>
+    <button data-v="-count">Nejvíc cest</button>
+    <button data-v="count">Nejméně cest</button>
+  </div>
+</details>
+
+<div class="stack mt3" id="kids">
+  {% for c in children %}
+  {% set s = stats.get(c.id, (0, 0, 0)) %}
+  <a class="item press" href="{{ url_for('child_detail', child_id=c.id) }}"
+     data-name="{{ c.first_name|lower }}" data-day="{{ c.weekday or '' }}" data-time="{{ (c.start_time or '')[:5] }}"
+     data-level="{{ c.level or 'začátečník' }}" data-count="{{ s[0] }}" data-points="{{ s[1] }}">
+    {{ avatar(c.first_name, c.gender, c.level) }}
+    <div class="grow">
+      <p class="name">{{ c.first_name }}</p>
+      <div class="row wrap gap15 mt1">
+        {% if c.weekday %}<span class="chip plain">{{ WEEKDAYS_SHORT[c.weekday] }} {{ c.start_time[:5] }}</span>
+        {% else %}<span class="tiny muted strong">Bez kroužku</span>{% endif %}
+        {{ level_chip(c.level) }}
+      </div>
+    </div>
+    <div class="right">
+      <p class="tiny strong">{{ s[0] }} {{ cesty_word(s[0]) }}</p>
+      <p class="tiny strong muted">{{ s[1] }} b · {{ s[2] }} L</p>
+    </div>
+  </a>
+  {% endfor %}
+  <p class="card p4 empty" id="none" {{ 'hidden' if children }}>Nic nenalezeno.</p>
+</div>
+{% endblock %}

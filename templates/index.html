@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Kroužky — HC4{% endblock %}
+{% block content %}
+<div class="daybar">
+  <a class="round" href="{{ url_for('index', day=prev_day) }}" aria-label="Předchozí den">‹</a>
+  <div class="center">
+    <p class="day">{{ WEEKDAYS_CS[day] }}</p>
+    {% if day == today %}<span class="today">Dnes</span>{% endif %}
+  </div>
+  <a class="round" href="{{ url_for('index', day=next_day) }}" aria-label="Další den">›</a>
+</div>
+
+<div class="stack mt5">
+  {% for g in groups %}
+  <a class="card tint press slot-card" href="{{ url_for('group_detail', group_id=g.id) }}">
+    <div class="grow">
+      <p class="big">{{ g.start_time[:5] }}–{{ g.end_time[:5] }}</p>
+      <p class="tiny accent">Otevřít kroužek</p>
+    </div>
+    <span class="dot-btn">›</span>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

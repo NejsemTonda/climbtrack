@@ -1,0 +1,52 @@
+{% macro avatar(name, gender, level, size='md') -%}
+<div class="avatar {{ size }}">
+  <span class="lvlbar lvl-{{ level_class(level) }}" aria-label="{{ level or 'začátečník' }}"></span>
+  <div class="face {{ 'girl' if gender == 'holka' else 'boy' }}">{{ name[:1] }}</div>
+</div>
+{%- endmacro %}
+
+{% macro level_chip(level) -%}
+<span class="chip lvl-chip lvl-{{ level_class(level) }}"><i></i>{{ level or 'začátečník' }}</span>
+{%- endmacro %}
+
+{% macro style_chip(style) -%}
+<span class="chip {{ 'style-lead' if style == 'na prvním' else 'style-tr' }}">{{ style }}</span>
+{%- endmacro %}
+
+{% macro child_fields(c=None, submit='Přidat do kroužku') -%}
+<div class="gender-pick">
+  {% set gv = c.gender if c else 'kluk' %}
+  <label><input type="radio" name="gender" value="kluk" {{ 'checked' if gv == 'kluk' }}><span class="boy">Kluk</span></label>
+  <label><input type="radio" name="gender" value="holka" {{ 'checked' if gv == 'holka' }}><span class="girl">Holka</span></label>
+</div>
+<input required name="first_name" maxlength="60" placeholder="Jméno" value="{{ c.first_name if c }}" data-gender-auto>
+<div class="grid2">
+  <input required type="number" name="birth_year" min="1940" max="{{ this_year() }}" placeholder="Rok narození" value="{{ c.birth_year if c and c.birth_year is not none }}">
+  <input required type="number" name="climbing_years" min="0" max="60" placeholder="Kolik let leze" value="{{ c.climbing_years if c and c.climbing_years is not none }}" data-level-preview>
+</div>
+<p class="tiny muted" data-level-out></p>
+<button class="btn primary full">{{ submit }}</button>
+{%- endmacro %}
+
+{% macro task_rows(tasks, visible) %}
+<div class="task-rows">
+  {% for i in range(MAX_TASKS) %}
+  {% set t = tasks[i] if i < tasks|length else none %}
+  {% set show = i < visible %}
+  <div class="task-row" {{ 'hidden' if not show }}>
+    <input type="hidden" name="id-{{ i }}" value="{{ t.id if t }}">
+    <div class="row gap2">
+      <input required name="title-{{ i }}" maxlength="200" placeholder="Úkol {{ i + 1 }}" value="{{ t.title if t }}" {{ 'disabled' if not show }}>
+      <input required type="number" name="reward-{{ i }}" min="1" max="100" value="{{ t.reward if t else 1 }}" class="reward" aria-label="Lezíky za úkol {{ i + 1 }}" {{ 'disabled' if not show }}>
+      <button type="button" class="btn x" data-remove-row aria-label="Odebrat úkol {{ i + 1 }}">✕</button>
+    </div>
+    <div class="chips lvl-pick">
+      {% for l in LEVELS %}
+      <label><input type="checkbox" name="levels-{{ i }}" value="{{ l }}" {{ 'checked' if t and l in t.levels }} {{ 'disabled' if not show }}><span class="lvl-{{ level_class(l) }}">{{ l }}</span></label>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+  <button type="button" class="btn dashed full" data-add-row>+ Přidat úkol</button>
+</div>
+{% endmacro %}

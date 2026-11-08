@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Cesty na stěně — HC4{% endblock %}
+{% block content %}
+<h1 class="pt4"><span class="ico cesty-ico">≡</span> Cesty na stěně</h1>
+<p class="tiny muted">Přidejte cesty jednou — u dětí je pak jen vyberete při zápisu.</p>
+
+<form method="post" class="card mt3 p4 form">
+  <p class="caps muted">Barva cesty</p>
+  <div class="colors">
+    {% for name, hex in ROUTE_COLORS.items() %}
+    <label title="{{ name }}"><input type="radio" name="color" value="{{ name }}" required><span style="background: {{ hex }}"></span></label>
+    {% endfor %}
+  </div>
+  <div class="row gap2">
+    <input required type="number" inputmode="numeric" name="chain_number" min="1" max="999" placeholder="Číslo řetězu">
+    <button class="btn cesty-btn">Přidat</button>
+  </div>
+</form>
+
+<h2 class="mt6">Seznam cest ({{ routes|length }})</h2>
+<div class="stack">
+  {% if not routes %}<p class="card p4 empty">Zatím žádné cesty.</p>{% endif %}
+  {% for r in routes %}
+  <div class="item">
+    <i class="swatch xl" style="background: {{ color_hex(r.color) }}"></i>
+    <p class="grow small strong">Řetěz {{ r.chain_number }} · {{ r.color }}</p>
+    <form method="post" action="{{ url_for('delete_route', route_id=r.id) }}" data-confirm="Odebrat cestu ze seznamu? Zapsané přelezy zůstanou.">
+      <button class="link danger">Odebrat</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "_macros.html" import task_rows %}
+{% block title %}Lezík — 14denní výzvy{% endblock %}
+
+
+{% block content %}
+<h1 class="pt4"><span class="ico lez">◎</span> Lezík</h1>
+<p class="small muted">14denní výzva pro všechny kroužky. Každé dítě si vybere a splní nejvýš {{ LEZIK_MAX }} úkoly.</p>
+
+{% if challenge %}
+<div class="card tint lezik mt3 p4">
+  <p class="caps lez-text">Aktuální výzva · {{ challenge.starts_on|date }} – {{ challenge.ends_on|date }}</p>
+  {% if challenge.title %}<p class="strong mt1">{{ challenge.title }}</p>{% endif %}
+  <div class="stack mt3">
+    {% for t in tasks %}
+    <div class="item">
+      <span class="num">{{ loop.index }}</span>
+      <div class="grow">
+        <p class="small strong">{{ t.title }}</p>
+        <div class="row wrap gap1 mt1">
+          {% for l in t.levels or ['všichni'] %}
+          <span class="chip {{ 'plain' if l == 'všichni' else 'lvl-chip lvl-' ~ level_class(l) }}">{{ l }}</span>
+          {% endfor %}
+        </div>
+      </div>
+      <span class="chip lez">{{ t.reward }} {{ lezik_label(t.reward) }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="tiny muted mt3">Splnění zapíšete na kartě dítěte (klikněte na jméno dítěte).</p>
+
+  <details class="mt3">
+    <summary class="btn outline full" data-open="Zavřít úpravy" data-closed="✎ Upravit výzvu"></summary>
+    <form method="post" action="{{ url_for('edit_challenge', challenge_id=challenge.id) }}" class="card mt3 p4 form">
+      <p class="caps lez-text">Úpravy aktuální výzvy</p>
+      <input name="title" maxlength="200" placeholder="Název výzvy (nepovinné)" value="{{ challenge.title }}">
+      <label class="tiny muted strong">Začátek (trvá 14 dní)
+        <input type="date" name="starts_on" required value="{{ challenge.starts_on }}"></label>
+      {{ task_rows(tasks, [tasks|length, 1]|max) }}
+      <p class="tiny muted">Zrušený úkol zmizí ze seznamu, ale lezíky, které už děti získaly, jim zůstanou.</p>
+      <button class="btn primary full">Uložit úpravy</button>
+    </form>
+  </details>
+  <form method="post" action="{{ url_for('delete_challenge', challenge_id=challenge.id) }}" class="mt2"
+        data-confirm="Smazat tuto výzvu? Lezíci, které děti už získaly, jim zůstanou.">
+    <button class="link danger full-link">Smazat výzvu</button>
+  </form>
+</div>
+{% else %}
+<p class="card mt3 p4 empty">Zatím není vyhlášená žádná výzva.</p>
+{% endif %}
+
+<details class="mt3">
+  <summary class="btn primary full big-btn" data-open="Zavřít" data-closed="+ Nová 14denní výzva"></summary>
+  <form method="post" action="{{ url_for('create_challenge') }}" class="card mt3 p4 form"
+        {% if challenge %}data-confirm="Nová výzva ukončí tu současnou. Získané lezíky dětem zůstanou. Pokračovat?"{% endif %}>
+    <input name="title" maxlength="200" placeholder="Název výzvy (nepovinné)">
+    <label class="tiny muted strong">Začátek (trvá 14 dní)
+      <input type="date" name="starts_on" required value="{{ today }}"></label>
+    {{ task_rows([], 3) }}
+    <p class="tiny muted">Číslo vpravo = počet lezíků za úkol. Pod úkolem vyberte kategorie (nic = pro všechny). Dosavadní výzva skončí, získané lezíky dětem zůstanou.</p>
+    <button class="btn primary full">Vyhlásit výzvu</button>
+  </form>
+</details>
+{% endblock %}

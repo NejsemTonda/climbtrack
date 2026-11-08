@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "_macros.html" import avatar, level_chip, style_chip, child_fields %}
+{% block title %}Kroužek — HC4{% endblock %}
+{% block content %}
+<a class="back" href="{{ url_for('index', day=group.weekday) }}">← Zpět na přehled</a>
+<div class="card tint mt2 p4">
+  <div class="row between">
+    <span class="caps muted">{{ WEEKDAYS_CS[group.weekday] }}</span>
+    <span class="chip accent-chip">{{ group.start_time[:5] }}–{{ group.end_time[:5] }}</span>
+  </div>
+  <h1>Kroužek {{ group.start_time[:5] }}–{{ group.end_time[:5] }}</h1>
+  <p class="small muted">{{ children|length }} dětí · {{ n_climbs }} záznamů</p>
+</div>
+
+<details class="mt6">
+  <summary class="row between">
+    <h2>Děti v kroužku</h2>
+    <span class="link krouzky-text" data-open="Zavřít" data-closed="+ Přidat dítě"></span>
+  </summary>
+  <form method="post" action="{{ url_for('add_child', group_id=group.id) }}" class="card p4 form">
+    {{ child_fields() }}
+  </form>
+</details>
+
+<div class="stack">
+  {% if not children %}<p class="card p4 empty">Zatím žádné děti. Přidejte první!</p>{% endif %}
+  {% for c in children %}
+  {% set s = stats.get(c.id, (0, 0, 0)) %}
+  <a class="item press" href="{{ url_for('child_detail', child_id=c.id) }}">
+    {{ avatar(c.first_name, c.gender, c.level) }}
+    <div class="grow">
+      <p class="name">{{ c.first_name }}</p>
+      <div class="row wrap gap15 mt1">
+        {{ level_chip(c.level) }}
+        {% if c.birth_year %}<span class="tiny muted">{{ this_year() - c.birth_year }} let</span>{% endif %}
+      </div>
+    </div>
+    <span class="chip pts">{{ s[1] }} b</span>
+    <span class="chip lez">{{ s[2] }} L</span>
+    <span class="muted">›</span>
+  </a>
+  {% endfor %}
+</div>
+
+<h2 class="mt6">Poslední cesty</h2>
+<div class="stack">
+  {% if not climbs %}<p class="card p4 empty">Zatím žádné záznamy.</p>{% endif %}
+  {% for cl in climbs %}
+  <div class="item compact">
+    <span class="badge"><i class="swatch" style="background: {{ color_hex(cl.route_color) }}"></i>{{ cl.chain_number or cl.grade }}</span>
+    <div class="grow">
+      <p class="small strong">{{ cl.first_name }}</p>
+      <div class="row wrap gap15 mt05">
+        {{ style_chip(cl.style) }}
+        <span class="tiny strong accent">{{ points_for_style(cl.style) }} b</span>
+      </div>
+    </div>
+    <span class="tiny muted">{{ cl.climbed_at|date(true) }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

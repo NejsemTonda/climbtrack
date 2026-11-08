@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% from "_macros.html" import avatar, style_chip, child_fields %}
+{% block title %}Dítě — HC4{% endblock %}
+{% block content %}
+<a class="back" href="{{ url_for('group_detail', group_id=child.group_id) }}">← Zpět na kroužek</a>
+
+<details>
+  <summary class="card tint mt2 p4 row gap3 {{ 'tint-girl' if child.gender == 'holka' else 'tint-boy' }}">
+    {{ avatar(child.first_name, child.gender, child.level, 'lg') }}
+    <div class="grow">
+      <h1 class="h1sm">{{ child.first_name }}</h1>
+      <p class="tiny muted">
+        {{ WEEKDAYS_CS[child.weekday or 1] }} {% if child.start_time %}{{ child.start_time[:5] }}–{{ child.end_time[:5] }}{% endif %}
+        {%- if child.birth_year %} · {{ this_year() - child.birth_year }} let{% endif %}
+        {%- if child.level %} · {{ child.level }}{% endif %}
+      </p>
+    </div>
+    <span class="btn small-btn" data-open="Zavřít" data-closed="Upravit"></span>
+  </summary>
+  <form method="post" class="card mt3 p4 form">
+    {{ child_fields(child, 'Uložit změny') }}
+  </form>
+</details>
+
+<h2 class="mt3">Cesty</h2>
+{% if not routes %}<p class="card p4 empty">Zatím žádné cesty — přidejte je na stránce Cesty.</p>{% endif %}
+<div class="stack tight">
+  {% for r in routes %}
+  <form method="post" action="{{ url_for('log_climb', child_id=child.id) }}" class="item compact {{ 'faded' if r.rank == 2 }}">
+    <input type="hidden" name="route_id" value="{{ r.id }}">
+    <i class="swatch lg" style="background: {{ color_hex(r.color) }}"></i>
+    <p class="grow strong">{{ r.color }} <span class="muted">· {{ r.chain_number }}</span></p>
+    {% set undo = url_for('undo_climb', child_id=child.id) %}
+    <button name="style" value="top rope" class="log {{ 'done' if r.rank == 1 }}" {{ 'disabled' if r.rank == 2 }}
+      {% if r.rank == 1 %}formaction="{{ undo }}" data-confirm="Zrušit zápis {{ r.color }} {{ r.chain_number }} · Top Rope?"{% endif %}>{{ '✓ ' if r.rank >= 1 }}Top Rope</button>
+    <button name="style" value="na prvním" class="log {{ 'done' if r.rank == 2 }}"
+      {% if r.rank == 2 %}formaction="{{ undo }}" data-confirm="Zrušit zápis {{ r.color }} {{ r.chain_number }} · Lead?"{% endif %}>{{ '✓ ' if r.rank == 2 }}Lead</button>
+  </form>
+  {% endfor %}
+</div>
+
+<div class="card tint lezik mt3 p4">
+  <div class="row between">
+    <p class="strong"><span class="ico lez">◎</span> Lezík</p>
+    <span class="chip lez">{{ lezik_total }} {{ lezik_label(lezik_total) }}</span>
+  </div>
+  {% if not tasks %}
+    <p class="small muted mt2">Žádná aktuální výzva.</p>
+  {% else %}
+    <p class="tiny muted strong mt1">Splněno {{ done_in_challenge }} z {{ LEZIK_MAX }} povolených úkolů</p>
+    <div class="stack mt2">
+      {% for t in tasks %}
+      <form method="post" action="{{ url_for('toggle_lezik', child_id=child.id, task_id=t.id) }}">
+        <button class="task {{ 'done' if t.done }} {{ 'locked' if t.locked }}" {{ 'disabled' if t.locked }}>
+          <span class="tick">{{ '✓' if t.done else ('🔒' if t.locked else '') }}</span>
+          <span class="grow">
+            <span class="block strong">{{ t.title }}</span>
+            {% if t.wrong_level %}<span class="block tiny muted">Jen pro: {{ t.levels|join(', ') }}</span>
+            {% elif t.locked %}<span class="block tiny muted">Limit {{ LEZIK_MAX }} úkolů splněn</span>{% endif %}
+          </span>
+          <span class="tiny strong">{{ t.reward }} {{ lezik_label(t.reward) }}</span>
+        </button>
+      </form>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+
+<h2 class="mt6 row">Historie
+  <span class="push row gap15"><span class="chip pts">{{ points }} b</span><span class="chip lez">{{ lezik_total }} {{ lezik_label(lezik_total) }}</span></span>
+</h2>
+<div class="stack">
+  {% if not history %}<p class="card p4 empty">Zatím žádná historie.</p>{% endif %}
+  {% for kind, at, h in history %}
+    {% if kind == 'lezik' %}
+    <div class="item">
+      <span class="ico lez">◎</span>
+      <p class="grow small strong">{{ h.task_title }}</p>
+      <span class="tiny strong lez-text">+{{ h.reward }} {{ lezik_label(h.reward) }}</span>
+      <span class="tiny muted">{{ at|date }}</span>
+    </div>
+    {% else %}
+    <div class="item col">
+      <div class="row gap25">
+        <span class="badge"><i class="swatch" style="background: {{ color_hex(h.route_color) }}"></i>{{ h.chain_number or h.grade }}</span>
+        <div class="grow">
+          <p class="small strong">{{ h.route_color or 'Cesta' }}{% if h.chain_number %} · řetěz {{ h.chain_number }}{% endif %}</p>
+          <div class="mt1">{{ style_chip(h.style) }}</div>
+        </div>
+        <span class="tiny strong accent">+{{ points_for_style(h.style) }} b</span>
+        <span class="tiny muted">{{ at|date }}</span>
+      </div>
+      {% if h.note %}<p class="note">{{ h.note }}</p>{% endif %}
+    </div>
+    {% endif %}
+  {% endfor %}
+</div>
+{% endblock %}

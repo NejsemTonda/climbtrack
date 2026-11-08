@@ -1,0 +1,9 @@
+# /etc/caddy/Caddyfile — HTTPS certificates are obtained and renewed automatically.
+lezik.cz {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3100
+}
+
+www.lezik.cz {
+	redir https://lezik.cz{uri} permanent
+}

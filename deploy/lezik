@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Manage the lezik.cz web app (Flask + SQLite). Run `lezik help`.
+# Installed to ~/.local/bin by deploy/install.sh — edit the copy in the repo, not the installed one.
+set -euo pipefail
+SRC="$HOME/app"
+DB="$HOME/data/hc4.db"
+BACKUPS="$HOME/data/backups"
+KEEP=30
+PORT=3100
+
+check_local() { curl -fsS -o /dev/null "http://127.0.0.1:$PORT/"; }
+
+backup() {
+  mkdir -p "$BACKUPS"
+  local f="$BACKUPS/hc4-$(date +%Y%m%d-%H%M%S).db"
+  python3 -I -c 'import sqlite3,sys; s=sqlite3.connect(sys.argv[1]); d=sqlite3.connect(sys.argv[2]); s.backup(d); d.close()' "$DB" "$f"
+  ls -1t "$BACKUPS"/hc4-*.db | tail -n +$((KEEP + 1)) | xargs -r rm --
+  echo "Backup: $f"
+}
+
+deploy() {
+  cd "$SRC"
+  backup
+  local before branch
+  before="$(git rev-parse HEAD)"
+  branch="$(git rev-parse --abbrev-ref HEAD)"
+  echo "==> Updating code to origin/$branch"
+  # The server checkout is deploy-only: local edits are discarded.
+  git fetch -q origin
+  git reset -q --hard "origin/$branch"
+  echo "==> Installing dependencies, CLI and units"
+  deploy/install.sh
+  systemctl --user restart lezik
+  sleep 2
+  if check_local; then echo "==> Deployed $(git log -1 --format='%h %s')"; else
+    echo "!! New version failed, rolling back to ${before:0:7}"
+    git reset -q --hard "$before"; deploy/install.sh; systemctl --user restart lezik; exit 1; fi
+}
+
+restore() {
+  local f="${1:?usage: lezik restore BACKUP_FILE   (see: lezik backups)}"
+  [ -f "$f" ] || f="$BACKUPS/$f"
+  backup
+  systemctl --user stop lezik
+  cp "$f" "$DB"
+  rm -f "$DB-wal" "$DB-shm"
+  systemctl --user start lezik
+  echo "Restored $f"
+}
+
+main() {
+  case "${1:-help}" in
+    deploy)   deploy ;;
+    backup)   backup ;;
+    backups)  ls -1t "$BACKUPS" ;;
+    restore)  shift; restore "$@" ;;
+    config)   "${EDITOR:-nano}" "$HOME/env" && systemctl --user restart lezik ;;
+    start|stop|restart|status) systemctl --user "$1" lezik ;;
+    logs)     journalctl --user -u lezik -f -n 100 ;;
+    check)
+      check_local && echo "app (local):      OK" || echo "app (local):      DOWN"
+      curl -fsS -o /dev/null https://lezik.cz/ && echo "https://lezik.cz: OK" || echo "https://lezik.cz: not reachable" ;;
+    *) cat <<USAGE
+lezik deploy           update ~/app to origin, reinstall deps/CLI/units, restart (backs up DB first, rolls back on failure)
+lezik backup           back up the database now (also runs daily; last $KEEP kept)
+lezik backups          list backups
+lezik restore FILE     restore the database from a backup
+lezik config           edit settings (~/env: SECRET_KEY, APP_PASSWORD) and restart
+lezik start|stop|restart|status
+lezik logs             follow app logs
+lezik check            test local app and https://lezik.cz
+USAGE
+  esac
+}
+# Whole script is parsed before running, so `deploy` can safely replace this file.
+main "$@"; exit

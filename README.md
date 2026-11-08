@@ -18,3 +18,5 @@ Environment:
 
 Production: run behind any WSGI server, e.g. `pip install gunicorn && gunicorn -w 2 app:app`, with HTTPS in front if you use `APP_PASSWORD`.
 Backup = copy `hc4.db`.
+
+Hosting on lezik.cz (Caddy, systemd, `lezik` management command): see [`deploy/README.md`](deploy/README.md).

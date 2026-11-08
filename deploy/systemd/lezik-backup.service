@@ -1,0 +1,6 @@
+[Unit]
+Description=Back up lezik.cz database
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/lezik backup

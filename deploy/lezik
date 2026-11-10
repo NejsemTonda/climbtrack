@@ -9,7 +9,9 @@ BACKUPS="$HOME/data/backups"
 KEEP=30
 PORT=3100
 
-check_local() { curl -fsS -o /dev/null "http://127.0.0.1:$PORT/"; }
+# Any non-5xx answer means the app is up (401 when APP_PASSWORD is set).
+is_up() { local c; c="$(curl -sS -o /dev/null -w '%{http_code}' "$1")" && [ "$c" -lt 500 ]; }
+check_local() { is_up "http://127.0.0.1:$PORT/"; }
 
 backup() {
   mkdir -p "$BACKUPS"
@@ -64,7 +66,7 @@ main() {
     logs)     journalctl --user -u lezik -f -n 100 ;;
     check)
       check_local && echo "app (local):      OK" || echo "app (local):      DOWN"
-      curl -fsS -o /dev/null https://lezik.cz/ && echo "https://lezik.cz: OK" || echo "https://lezik.cz: not reachable" ;;
+      is_up https://lezik.cz/ && echo "https://lezik.cz: OK" || echo "https://lezik.cz: not reachable" ;;
     *) cat <<USAGE
 lezik deploy           update ~/app to origin, reinstall deps/CLI/units, restart (backs up DB first, rolls back on failure)
 lezik backup           back up the database now (also runs daily; last $KEEP kept)

@@ -10,7 +10,22 @@
 {%- endmacro %}
 
 {% macro style_chip(style) -%}
-<span class="chip {{ 'style-lead' if style == 'na prvním' else 'style-tr' }}">{{ style }}</span>
+<span class="chip {{ 'style-lead' if style == 'na prvním' else 'style-tr' }}">{{ STYLE_LABELS.get(style, style) }}</span>
+{%- endmacro %}
+
+{% macro kind_tabs(kind, endpoint) -%}
+<nav class="tabs mt3">
+  {% for k, label in KINDS.items() %}
+  <a href="{{ url_for(endpoint, druh=k, **kwargs) }}" class="{{ 'on' if k == kind }}">{{ label }}</a>
+  {% endfor %}
+</nav>
+{%- endmacro %}
+
+{% macro boulder_photo(r) -%}
+{% set label = r.color or 'Boulder' %}
+<a class="thumb" href="{{ url_for('photo', name=r.photo_path) }}" target="_blank" aria-label="Zvětšit fotku: {{ label }}">
+  <img src="{{ url_for('photo', name=r.photo_path) }}" alt="Boulder {{ label }}" loading="lazy">
+</a>
 {%- endmacro %}
 
 {% macro child_fields(c=None, submit='Přidat do kroužku') -%}

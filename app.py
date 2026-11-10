@@ -6,14 +6,17 @@ from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
-from flask import Flask, abort, flash, g, redirect, render_template, request, url_for
+from flask import Flask, abort, flash, g, redirect, render_template, request, send_from_directory, url_for
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("HC4_DB", os.path.join(APP_DIR, "hc4.db"))
+PHOTO_DIR = os.environ.get("HC4_PHOTOS", os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "boulder-photos"))
 TZ = ZoneInfo("Europe/Prague")
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32)
+PHOTO_MAX_BYTES = 10 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = PHOTO_MAX_BYTES + 64 * 1024  # photo + form fields
 
 WEEKDAYS_CS = ["", "Pondělí", "Úterý", "Středa", "Čtvrtek"]
 WEEKDAYS_SHORT = ["", "Po", "Út", "St", "Čt"]
@@ -28,6 +31,11 @@ ROUTE_COLORS = {
 }
 LEZIK_MAX_PER_CHALLENGE = 2
 MAX_TASKS = 6
+KINDS = {"cesta": "Cesty", "traverz": "Traverzy", "boulder": "Bouldery"}
+KIND_STYLE = {"traverz": "hotovo", "boulder": "top"}  # the single "done" style of non-rope climbs
+STYLE_LABELS = {"hotovo": "traverz", "top": "boulder"}
+TRAVERSE_POINTS = 5
+WEEKLY_BONUS_MAX = 4
 
 
 # ---------- db ----------
@@ -68,9 +76,24 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+def table_cols(conn, table):
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
 def init_db(conn, seed=True):
+    """Create missing tables and migrate older databases in place."""
+    old_routes = table_cols(conn, "routes") and "kind" not in table_cols(conn, "routes")
+    if old_routes:  # v2 -> v3: rebuild routes without UNIQUE (color, chain_number)
+        conn.execute("PRAGMA legacy_alter_table=ON")  # keep climbs' FK pointing at "routes"
+        conn.execute("ALTER TABLE routes RENAME TO routes_v2")
     with open(os.path.join(APP_DIR, "schema.sql")) as f:
         conn.executescript(f.read())
+    if old_routes:
+        conn.execute("INSERT INTO routes (id, color, chain_number, created_at) SELECT id, color, chain_number, created_at FROM routes_v2")
+        conn.execute("DROP TABLE routes_v2")
+    for col in ("route_kind TEXT NOT NULL DEFAULT 'cesta'", "route_name TEXT", "points INTEGER", "catalog_route_id TEXT"):
+        if col.split()[0] not in table_cols(conn, "climbs"):
+            conn.execute(f"ALTER TABLE climbs ADD COLUMN {col}")
     if seed and not conn.execute("SELECT 1 FROM groups").fetchone():
         names = {1: ["Malí horolezci", "Skalní veverky", "Pokročilí"],
                  2: ["Malí horolezci", "Starteři", "Pokročilí"],
@@ -97,9 +120,22 @@ def points_for_style(style):
     return STYLE_POINTS.get(style or "", 0)
 
 
+def points_for_climb(c):
+    """Traverz 5, boulder its stored points, rope route by style."""
+    if c["route_kind"] == "traverz":
+        return TRAVERSE_POINTS
+    if c["route_kind"] == "boulder":
+        return c["points"] or 0
+    return points_for_style(c["style"])
+
+
 def route_key(c):
-    if c["route_color"] and c["chain_number"]:
-        return f"{c['route_color']}#{c['chain_number']}"
+    kind = c["route_kind"] or "cesta"
+    rid = c["catalog_route_id"] or c["route_id"]
+    if kind != "cesta" and rid:
+        return f"r:{rid}"
+    if c["route_name"] or (c["route_color"] and c["chain_number"]):
+        return f"{kind}:{c['route_color'] or ''}#{c['chain_number'] or 0}#{c['route_name'] or ''}"
     if c["route_id"]:
         return f"r:{c['route_id']}"
     return f"c:{c['id']}"
@@ -110,8 +146,41 @@ def total_points(climbs):
     best = {}
     for c in climbs:
         k = route_key(c)
-        best[k] = max(best.get(k, 0), points_for_style(c["style"]))
+        best[k] = max(best.get(k, 0), points_for_climb(c))
     return sum(best.values())
+
+
+def route_label(r):
+    """Name, or colour · number; falls back to the kind name."""
+    parts = " · ".join(str(x) for x in (r["color"], r["chain_number"] or "") if x)
+    if r["name"]:
+        return f"{r['name']} ({parts})" if parts else r["name"]
+    return parts or {"boulder": "Boulder", "traverz": "Traverz"}.get(r["kind"], "Cesta")
+
+
+def week_start(d=None):
+    """Monday of the calendar week (Prague time)."""
+    d = d or datetime.now(TZ).date()
+    return (d - timedelta(days=d.weekday())).isoformat()
+
+
+def photo_ext(data):
+    """jpg/png/webp from the file's magic bytes, else None."""
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+def remove_photo(path):
+    if path:
+        try:
+            os.remove(os.path.join(PHOTO_DIR, os.path.basename(path)))
+        except FileNotFoundError:
+            pass
 
 
 def level_for_years(years):
@@ -152,9 +221,12 @@ def current_challenge():
 def child_stats():
     """{child_id: (climb_count, points, lezik)} for every child."""
     climbs = {}
-    for c in q("SELECT id, child_id, route_id, route_color, chain_number, style FROM climbs"):
+    for c in q("""SELECT id, child_id, route_id, route_color, chain_number, style, route_kind, route_name, points,
+                         catalog_route_id FROM climbs"""):
         climbs.setdefault(c["child_id"], []).append(c)
-    lezik = {r["child_id"]: r["s"] for r in q("SELECT child_id, SUM(reward) s FROM lezik_completions GROUP BY child_id")}
+    lezik = {r["child_id"]: r["s"] for r in q("""SELECT child_id, SUM(reward) s FROM (
+        SELECT child_id, reward FROM lezik_completions UNION ALL SELECT child_id, reward FROM lezik_weekly_bonuses
+    ) GROUP BY child_id""")}
     ids = set(climbs) | set(lezik)
     return {i: (len(climbs.get(i, [])), total_points(climbs.get(i, [])), lezik.get(i, 0)) for i in ids}
 
@@ -252,16 +324,24 @@ def child_detail(child_id):
                   LEFT JOIN groups ON groups.id = children.group_id WHERE children.id=?""", child_id) or abort(404)
     climbs = q("SELECT * FROM climbs WHERE child_id=? ORDER BY climbed_at DESC", child_id)
     done = q("SELECT * FROM lezik_completions WHERE child_id=? ORDER BY completed_at DESC", child_id)
+    bonuses = q("SELECT * FROM lezik_weekly_bonuses WHERE child_id=?", child_id)
+    bonus = next((b for b in bonuses if b["week_start"] == week_start()), None)
+    kind = request.args.get("druh") if request.args.get("druh") in KINDS else "cesta"
 
-    # Routes the child has not finished on lead first (same order as the original).
+    # Routes the child has not finished (on lead) first (same order as the original).
     styles = {}
     for c in climbs:
-        if c["route_color"] and c["chain_number"]:
+        if (c["route_kind"] or "cesta") != kind:
+            continue
+        if kind != "cesta":
+            styles.setdefault(c["catalog_route_id"] or c["route_id"], set()).add(c["style"])
+        elif c["route_color"] and c["chain_number"]:
             styles.setdefault(f"{c['route_color']}#{c['chain_number']}", set()).add(c["style"])
     def rank(r):
-        s = styles.get(f"{r['color']}#{r['chain_number']}", set())
-        return 2 if "na prvním" in s else 1 if "top rope" in s else 0
-    routes = sorted(({**dict(r), "rank": rank(r)} for r in q("SELECT * FROM routes ORDER BY chain_number, color")),
+        s = styles.get(r["id"] if kind != "cesta" else f"{r['color']}#{r['chain_number']}", set())
+        return 2 if s & {"na prvním", "hotovo", "top"} else 1 if "top rope" in s else 0
+    routes = sorted(({**dict(r), "rank": rank(r)}
+                     for r in q("SELECT * FROM routes WHERE kind=? ORDER BY chain_number, color, name", kind)),
                     key=lambda r: r["rank"])
 
     challenge, tasks = current_challenge()
@@ -273,11 +353,39 @@ def child_detail(child_id):
         t["wrong_level"] = not t["done"] and bool(t["levels"]) and lvl not in t["levels"]
         t["locked"] = not t["done"] and (t["wrong_level"] or done_in_challenge >= LEZIK_MAX_PER_CHALLENGE)
 
-    history = sorted([("climb", c["climbed_at"], c) for c in climbs] + [("lezik", d["completed_at"], d) for d in done],
+    lezik = list(done) + [{"task_title": "Týdenní bonus", "reward": b["reward"], "completed_at": b["updated_at"]}
+                          for b in bonuses]
+    history = sorted([("climb", c["climbed_at"], c) for c in climbs] + [("lezik", d["completed_at"], d) for d in lezik],
                      key=lambda h: h[1], reverse=True)
-    return render_template("child.html", child=child, routes=routes, tasks=tasks, challenge=challenge,
-                           done_in_challenge=done_in_challenge, history=history,
-                           points=total_points(climbs), lezik_total=sum(d["reward"] for d in done))
+    return render_template("child.html", child=child, routes=routes, kind=kind, tasks=tasks, challenge=challenge,
+                           done_in_challenge=done_in_challenge, history=history, bonus=bonus,
+                           points=total_points(climbs), lezik_total=sum(d["reward"] for d in lezik))
+
+
+@app.post("/dite/<child_id>/smazat")
+def delete_child(child_id):
+    child = q1("SELECT * FROM children WHERE id=?", child_id) or abort(404)
+    run("DELETE FROM children WHERE id=?", child_id)  # climbs, lezíky and bonuses cascade
+    flash("Dítě odebráno")
+    return redirect(url_for("group_detail", group_id=child["group_id"]))
+
+
+@app.post("/dite/<child_id>/bonus")
+def toggle_bonus(child_id):
+    """Weekly BONUS: one entry per child and week (1–4 lezíky); posting again cancels it."""
+    q1("SELECT 1 FROM children WHERE id=?", child_id) or abort(404)
+    week = week_start()
+    if q1("SELECT 1 FROM lezik_weekly_bonuses WHERE child_id=? AND week_start=?", child_id, week):
+        run("DELETE FROM lezik_weekly_bonuses WHERE child_id=? AND week_start=?", child_id, week)
+        flash("Bonus zrušen")
+    else:
+        reward = form_int("reward", 1, WEEKLY_BONUS_MAX)
+        if reward is None:
+            flash(f"Bonus může být 1 až {WEEKLY_BONUS_MAX} lezíky", "error")
+        else:
+            run("INSERT INTO lezik_weekly_bonuses VALUES (?,?,?,?,?,?)", new_id(), child_id, week, reward, now_iso(), now_iso())
+            flash(f"+{reward} {lezik_label(reward)}")
+    return redirect(url_for("child_detail", child_id=child_id))
 
 
 @app.post("/dite/<child_id>")
@@ -296,32 +404,45 @@ def log_climb(child_id):
     child = q1("SELECT * FROM children WHERE id=?", child_id) or abort(404)
     route = q1("SELECT * FROM routes WHERE id=?", request.form.get("route_id", ""))
     style = request.form.get("style")
-    if not route or style not in STYLES:
+    if not route or style not in (KIND_STYLE.get(route["kind"]) or STYLES):
         flash("Vyberte cestu a styl", "error")
         return redirect(url_for("child_detail", child_id=child_id))
-    prev = {r["style"] for r in q("SELECT style FROM climbs WHERE child_id=? AND route_color=? AND chain_number=?",
-                                  child_id, route["color"], route["chain_number"])}
+    kind = route["kind"]
+    url = url_for("child_detail", child_id=child_id, druh=kind)
+    if kind == "cesta":
+        prev = {r["style"] for r in q("""SELECT style FROM climbs WHERE child_id=? AND route_kind='cesta'
+                                         AND route_color=? AND chain_number=?""",
+                                      child_id, route["color"], route["chain_number"])}
+    else:
+        prev = {r["style"] for r in q("SELECT style FROM climbs WHERE child_id=? AND catalog_route_id=?", child_id, route["id"])}
     if style in prev:
-        flash(f"Tuhle cestu už má zapsanou ({style})", "error")
+        flash(f"Tuhle cestu už má zapsanou ({style})" if kind == "cesta" else "Tohle už má zapsané", "error")
     elif style == "top rope" and "na prvním" in prev:
         flash("Tuhle cestu už vylezl/a na prvním", "error")
     else:
-        run("""INSERT INTO climbs (id, child_id, group_id, route_id, route_color, chain_number, style, climbed_at)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            new_id(), child_id, child["group_id"], route["id"], route["color"], route["chain_number"], style, now_iso())
-        flash(f"{route['color']} {route['chain_number']} · {'Lead' if style == 'na prvním' else 'Top Rope'} zapsáno")
-    return redirect(url_for("child_detail", child_id=child_id))
+        points = {"traverz": TRAVERSE_POINTS, "boulder": route["points"] or 0}.get(kind)
+        run("""INSERT INTO climbs (id, child_id, group_id, route_id, route_color, chain_number, style, climbed_at,
+                                   route_kind, route_name, points, catalog_route_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            new_id(), child_id, child["group_id"], route["id"], route["color"], route["chain_number"], style, now_iso(),
+            kind, route["name"] or None, points, route["id"] if kind != "cesta" else None)
+        label = {"na prvním": "Lead", "top rope": "Top Rope", "hotovo": "Hotovo", "top": "Top"}[style]
+        flash(f"{route_label(route)} · {label} zapsáno")
+    return redirect(url)
 
 
 @app.post("/dite/<child_id>/cesta/zrusit")
 def undo_climb(child_id):
     route = q1("SELECT * FROM routes WHERE id=?", request.form.get("route_id", ""))
     style = request.form.get("style")
-    if route and style in STYLES:
-        run("DELETE FROM climbs WHERE child_id=? AND route_color=? AND chain_number=? AND style=?",
+    if route and route["kind"] != "cesta":
+        run("DELETE FROM climbs WHERE child_id=? AND catalog_route_id=?", child_id, route["id"])
+        flash("Zápis zrušen")
+    elif route and style in STYLES:
+        run("DELETE FROM climbs WHERE child_id=? AND route_kind='cesta' AND route_color=? AND chain_number=? AND style=?",
             child_id, route["color"], route["chain_number"], style)
         flash("Zápis zrušen")
-    return redirect(url_for("child_detail", child_id=child_id))
+    return redirect(url_for("child_detail", child_id=child_id, druh=route["kind"] if route else None))
 
 
 @app.post("/dite/<child_id>/lezik/<task_id>")
@@ -352,24 +473,66 @@ def toggle_lezik(child_id, task_id):
 @app.route("/cesty", methods=["GET", "POST"])
 def routes_page():
     if request.method == "POST":
-        color = request.form.get("color")
-        n = form_int("chain_number", 1, 999)
-        if color not in ROUTE_COLORS or n is None:
-            flash("Vyberte barvu a zadejte číslo řetězu", "error")
-        elif q1("SELECT 1 FROM routes WHERE color=? AND chain_number=?", color, n):
-            flash("Tato cesta už v seznamu je", "error")
-        else:
-            run("INSERT INTO routes VALUES (?,?,?,?)", new_id(), color, n, now_iso())
-            flash("Cesta přidána")
-        return redirect(url_for("routes_page"))
-    return render_template("routes.html", routes=q("SELECT * FROM routes ORDER BY chain_number, color"))
+        kind = request.form.get("kind") if request.form.get("kind") in KINDS else "cesta"
+        add_route(kind)
+        return redirect(url_for("routes_page", druh=kind))
+    kind = request.args.get("druh") if request.args.get("druh") in KINDS else "cesta"
+    return render_template("routes.html", kind=kind,
+                           routes=q("SELECT * FROM routes WHERE kind=? ORDER BY chain_number, color, name", kind))
+
+
+def add_route(kind):
+    color = request.form.get("color", "")
+    name = request.form.get("name", "").strip()[:80] if kind == "traverz" else ""
+    desc = request.form.get("description", "").strip()[:300] if kind != "cesta" else ""
+    n = form_int("chain_number", 1, 999) if kind == "cesta" else 0
+    pts = form_int("points", 1, 100) if kind == "boulder" else None
+    photo = request.files.get("photo") if kind == "boulder" else None
+    data = photo.read(PHOTO_MAX_BYTES + 1) if photo and photo.filename else b""
+    ext = photo_ext(data)
+    if color and color not in ROUTE_COLORS:
+        flash("Neznámá barva", "error")
+    elif kind == "cesta" and (not color or n is None):
+        flash("Vyberte barvu a zadejte číslo", "error")
+    elif kind == "traverz" and not name and not color:
+        flash("Napište název nebo vyberte barvu", "error")
+    elif kind == "boulder" and pts is None:
+        flash("Zadejte počet bodů za boulder", "error")
+    elif data and not ext:
+        flash("Vyberte fotku JPG, PNG nebo WebP", "error")
+    elif len(data) > PHOTO_MAX_BYTES:
+        flash("Fotka může mít nejvýše 10 MB", "error")
+    elif kind != "boulder" and q1("SELECT 1 FROM routes WHERE kind=? AND color=? AND chain_number=? AND name=?",
+                                  kind, color, n, name):
+        flash("Toto už v seznamu je", "error")
+    else:
+        path = None
+        if data:
+            os.makedirs(PHOTO_DIR, exist_ok=True)
+            path = f"{uuid.uuid4()}.{ext}"
+            with open(os.path.join(PHOTO_DIR, path), "wb") as f:
+                f.write(data)
+        try:
+            run("""INSERT INTO routes (id, color, chain_number, created_at, kind, points, name, photo_path, description)
+                   VALUES (?,?,?,?,?,?,?,?,?)""", new_id(), color, n, now_iso(), kind, pts, name, path, desc or None)
+        except sqlite3.Error:
+            remove_photo(path)
+            raise
+        flash("Přidáno")
 
 
 @app.post("/cesty/<route_id>/smazat")
 def delete_route(route_id):
-    run("DELETE FROM routes WHERE id=?", route_id)  # climbs keep color + chain, route_id becomes NULL
-    flash("Cesta odebrána")
-    return redirect(url_for("routes_page"))
+    route = q1("SELECT * FROM routes WHERE id=?", route_id) or abort(404)
+    run("DELETE FROM routes WHERE id=?", route_id)  # climbs keep color + chain / catalog id, route_id becomes NULL
+    remove_photo(route["photo_path"])
+    flash("Odebráno")
+    return redirect(url_for("routes_page", druh=route["kind"]))
+
+
+@app.get("/foto/<name>")
+def photo(name):
+    return send_from_directory(PHOTO_DIR, name, max_age=30 * 24 * 3600)  # names are random uuids, never reused
 
 
 def task_rows():
@@ -465,7 +628,9 @@ app.jinja_env.filters["date"] = fmt_date
 app.jinja_env.globals.update(
     WEEKDAYS_CS=WEEKDAYS_CS, WEEKDAYS_SHORT=WEEKDAYS_SHORT, LEVELS=LEVELS, SLOTS=SLOTS, STYLES=STYLES,
     STYLE_POINTS=STYLE_POINTS, ROUTE_COLORS=ROUTE_COLORS, MAX_TASKS=MAX_TASKS, LEZIK_MAX=LEZIK_MAX_PER_CHALLENGE,
-    lezik_label=lezik_label, cesty_word=cesty_word, points_for_style=points_for_style,
+    KINDS=KINDS, KIND_STYLE=KIND_STYLE, STYLE_LABELS=STYLE_LABELS, TRAVERSE_POINTS=TRAVERSE_POINTS,
+    WEEKLY_BONUS_MAX=WEEKLY_BONUS_MAX, route_label=route_label,
+    lezik_label=lezik_label, cesty_word=cesty_word, points_for_climb=points_for_climb,
     level_class=lambda l: {"mírně pokročilé": "mid", "master": "master"}.get(l or "", "beginner"),
     color_hex=lambda c: ROUTE_COLORS.get(c or "", "#e5e7eb"),
     this_year=lambda: date.today().year,

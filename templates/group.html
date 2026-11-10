@@ -52,7 +52,7 @@
       <p class="small strong">{{ cl.first_name }}</p>
       <div class="row wrap gap15 mt05">
         {{ style_chip(cl.style) }}
-        <span class="tiny strong accent">{{ points_for_style(cl.style) }} b</span>
+        <span class="tiny strong accent">{{ points_for_climb(cl) }} b</span>
       </div>
     </div>
     <span class="tiny muted">{{ cl.climbed_at|date(true) }}</span>

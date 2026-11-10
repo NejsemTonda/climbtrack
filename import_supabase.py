@@ -1,23 +1,27 @@
 """One-off copy of all data from the old Lovable/Supabase project into hc4.db.
 
 Usage:  python import_supabase.py ../climbtrack/.env
-Reads SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY from that .env file. Replaces everything in hc4.db.
+Reads SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY from that .env file. Replaces everything in hc4.db; boulder photos go to PHOTO_DIR.
 """
 import json
 import sqlite3
 import sys
 import urllib.request
 
-from app import DB_PATH, init_db
+import os
+
+from app import DB_PATH, PHOTO_DIR, init_db
 
 COLUMNS = {
     "groups": ["id", "name", "weekday", "start_time", "end_time", "created_at"],
     "children": ["id", "group_id", "first_name", "gender", "birth_year", "climbing_years", "level", "created_at"],
-    "routes": ["id", "color", "chain_number", "created_at"],
-    "climbs": ["id", "child_id", "group_id", "route_id", "route_color", "chain_number", "grade", "style", "note", "climbed_at"],
+    "routes": ["id", "color", "chain_number", "created_at", "kind", "points", "name", "photo_path", "description"],
+    "climbs": ["id", "child_id", "group_id", "route_id", "route_color", "chain_number", "grade", "style", "note", "climbed_at",
+               "route_kind", "route_name", "points", "catalog_route_id"],
     "lezik_challenges": ["id", "title", "starts_on", "ends_on", "created_at"],
     "lezik_tasks": ["id", "challenge_id", "title", "reward", "levels", "position"],
     "lezik_completions": ["id", "child_id", "task_id", "task_title", "reward", "completed_at"],
+    "lezik_weekly_bonuses": ["id", "child_id", "week_start", "reward", "created_at", "updated_at"],
 }
 
 
@@ -39,6 +43,14 @@ def main(env_path):
     base = env["SUPABASE_URL"].strip('"').rstrip("/")
     key = env["SUPABASE_PUBLISHABLE_KEY"].strip('"')
     data = {t: fetch(base, key, t) for t in COLUMNS}  # fetch everything before touching the local db
+    os.makedirs(PHOTO_DIR, exist_ok=True)
+    for r in data["routes"]:  # boulder photos from the private "boulder-photos" bucket
+        if r.get("photo_path"):
+            r["photo_path"] = os.path.basename(r["photo_path"])
+            req = urllib.request.Request(f"{base}/storage/v1/object/authenticated/boulder-photos/{r['photo_path']}",
+                                         headers={"apikey": key, "Authorization": f"Bearer {key}"})
+            with urllib.request.urlopen(req, timeout=60) as resp, open(os.path.join(PHOTO_DIR, r["photo_path"]), "wb") as f:
+                f.write(resp.read())
 
     conn = sqlite3.connect(DB_PATH)
     init_db(conn, seed=False)

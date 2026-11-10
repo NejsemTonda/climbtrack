@@ -1,30 +1,58 @@
 {% extends "base.html" %}
+{% from "_macros.html" import kind_tabs, boulder_photo %}
 {% block title %}Cesty na stěně — HC4{% endblock %}
 {% block content %}
 <h1 class="pt4"><span class="ico cesty-ico">≡</span> Cesty na stěně</h1>
 <p class="tiny muted">Přidejte cesty jednou — u dětí je pak jen vyberete při zápisu.</p>
 
-<form method="post" class="card mt3 p4 form">
-  <p class="caps muted">Barva cesty</p>
+{{ kind_tabs(kind, 'routes_page') }}
+{% if kind == 'traverz' %}<p class="tiny muted mt2">Každý traverz = {{ TRAVERSE_POINTS }} bodů.</p>{% endif %}
+
+<form method="post" class="card mt3 p4 form" {% if kind == 'boulder' %}enctype="multipart/form-data"{% endif %}>
+  <input type="hidden" name="kind" value="{{ kind }}">
+  {% if kind == 'traverz' %}
+  <input name="name" maxlength="80" placeholder="Název traverzu (nepovinné)">
+  <p class="caps muted">Popis (nepovinné)</p>
+  <textarea name="description" maxlength="300" rows="3" placeholder="Např. kde začít, kam traverz vede, na co si dát pozor"></textarea>
+  {% endif %}
+  <p class="caps muted">{{ 'Barva' if kind == 'cesta' else 'Barva (nepovinné)' }}</p>
   <div class="colors">
+    {% if kind != 'cesta' %}<label title="bez barvy"><input type="radio" name="color" value="" checked><span class="no-color">–</span></label>{% endif %}
     {% for name, hex in ROUTE_COLORS.items() %}
-    <label title="{{ name }}"><input type="radio" name="color" value="{{ name }}" required><span style="background: {{ hex }}"></span></label>
+    <label title="{{ name }}"><input type="radio" name="color" value="{{ name }}" {{ 'required' if kind == 'cesta' }}><span style="background: {{ hex }}"></span></label>
     {% endfor %}
   </div>
+  {% if kind == 'boulder' %}
+  <p class="caps muted">Fotka (nepovinné)</p>
+  <input type="file" name="photo" accept="image/jpeg,image/png,image/webp" aria-label="Fotka boulderu">
+  <p class="caps muted">Popis (nepovinné)</p>
+  <textarea name="description" maxlength="300" rows="3" placeholder="Např. jak je postavený, kde začít, na co si dát pozor"></textarea>
+  {% endif %}
   <div class="row gap2">
+    {% if kind == 'cesta' %}
     <input required type="number" inputmode="numeric" name="chain_number" min="1" max="999" placeholder="Číslo řetězu">
-    <button class="btn cesty-btn">Přidat</button>
+    {% elif kind == 'boulder' %}
+    <input required type="number" inputmode="numeric" name="points" min="1" max="100" placeholder="Body" class="reward">
+    {% endif %}
+    <button class="btn cesty-btn {{ 'push' if kind != 'cesta' }}">Přidat</button>
   </div>
 </form>
 
-<h2 class="mt6">Seznam cest ({{ routes|length }})</h2>
+<h2 class="mt6">{{ KINDS[kind] }} ({{ routes|length }})</h2>
 <div class="stack">
-  {% if not routes %}<p class="card p4 empty">Zatím žádné cesty.</p>{% endif %}
+  {% if not routes %}<p class="card p4 empty">Zatím nic.</p>{% endif %}
   {% for r in routes %}
   <div class="item">
-    <i class="swatch xl" style="background: {{ color_hex(r.color) }}"></i>
-    <p class="grow small strong">Řetěz {{ r.chain_number }} · {{ r.color }}</p>
-    <form method="post" action="{{ url_for('delete_route', route_id=r.id) }}" data-confirm="Odebrat cestu ze seznamu? Zapsané přelezy zůstanou.">
+    {% if r.photo_path %}{{ boulder_photo(r) }}{% endif %}
+    {% if r.color %}<i class="swatch xl" style="background: {{ color_hex(r.color) }}"></i>{% else %}<i class="swatch xl blank"></i>{% endif %}
+    <div class="grow">
+      <p class="small strong">
+        {%- if kind == 'cesta' %}Řetěz {{ r.chain_number }} · {{ r.color }}
+        {%- else %}{{ route_label(r) }}{% if kind == 'boulder' %}<span class="muted"> · {{ r.points or 0 }} b</span>{% endif %}{% endif -%}
+      </p>
+      {% if r.description %}<p class="tiny muted clamp2">{{ r.description }}</p>{% endif %}
+    </div>
+    <form method="post" action="{{ url_for('delete_route', route_id=r.id) }}" data-confirm="Odebrat ze seznamu? Zapsané přelezy zůstanou.">
       <button class="link danger">Odebrat</button>
     </form>
   </div>

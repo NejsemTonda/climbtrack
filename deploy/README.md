@@ -16,8 +16,9 @@ Layout of `/home/climbtrack`:
 
 ```
 app/              this repo (deploy-only checkout) + .venv
-data/hc4.db       live database — outside the repo, so deploys never touch it
-data/backups/     backups
+data/hc4.db       live database — outside the repo, so deploys only migrate it (`flask init-db`)
+data/boulder-photos/  uploaded boulder photos (HC4_PHOTOS)
+data/backups/     backups (database snapshots + a copy of boulder-photos/)
 env               settings, see env.example
 .local/bin/lezik  installed copy of deploy/lezik
 ```
@@ -28,7 +29,7 @@ env               settings, see env.example
 
 | Command | |
 |---|---|
-| `lezik deploy` | back up DB, reset `~/app` to `origin/<branch>`, reinstall deps + CLI + units, restart; rolls back if the app doesn't respond |
+| `lezik deploy` | back up DB, reset `~/app` to `origin/<branch>`, reinstall deps + CLI + units, migrate the DB, restart; rolls back if the app doesn't respond |
 | `lezik logs` | follow logs |
 | `lezik status` / `restart` / `stop` / `start` | service control |
 | `lezik backup` / `backups` / `restore FILE` | database backups |

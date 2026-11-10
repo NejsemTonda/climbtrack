@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import avatar, style_chip, child_fields %}
+{% from "_macros.html" import avatar, style_chip, child_fields, kind_tabs, boulder_photo %}
 {% block title %}Dítě — HC4{% endblock %}
 {% block content %}
 <a class="back" href="{{ url_for('group_detail', group_id=child.group_id) }}">← Zpět na kroužek</a>
@@ -19,22 +19,37 @@
   </summary>
   <form method="post" class="card mt3 p4 form">
     {{ child_fields(child, 'Uložit změny') }}
+    <button class="btn danger-btn full" formaction="{{ url_for('delete_child', child_id=child.id) }}" formnovalidate
+      data-confirm="Opravdu odebrat {{ child.first_name }}? Smažou se i jeho cesty, body a lezíci.">Odebrat dítě</button>
   </form>
 </details>
 
-<h2 class="mt3">Cesty</h2>
-{% if not routes %}<p class="card p4 empty">Zatím žádné cesty — přidejte je na stránce Cesty.</p>{% endif %}
-<div class="stack tight">
+{{ kind_tabs(kind, 'child_detail', child_id=child.id) }}
+{% if not routes %}<p class="card p4 empty mt2">Zatím nic — přidejte je na stránce Cesty.</p>{% endif %}
+<div class="stack tight mt2">
+  {% set undo = url_for('undo_climb', child_id=child.id) %}
   {% for r in routes %}
+  {% set label = route_label(r) %}
   <form method="post" action="{{ url_for('log_climb', child_id=child.id) }}" class="item compact {{ 'faded' if r.rank == 2 }}">
     <input type="hidden" name="route_id" value="{{ r.id }}">
-    <i class="swatch lg" style="background: {{ color_hex(r.color) }}"></i>
+    {% if r.color %}<i class="swatch lg" style="background: {{ color_hex(r.color) }}"></i>{% else %}<i class="swatch lg blank"></i>{% endif %}
+    {% if r.photo_path %}{{ boulder_photo(r) }}{% endif %}
+    {% if kind == 'cesta' %}
     <p class="grow strong">{{ r.color }} <span class="muted">· {{ r.chain_number }}</span></p>
-    {% set undo = url_for('undo_climb', child_id=child.id) %}
     <button name="style" value="top rope" class="log {{ 'done' if r.rank == 1 }}" {{ 'disabled' if r.rank == 2 }}
-      {% if r.rank == 1 %}formaction="{{ undo }}" data-confirm="Zrušit zápis {{ r.color }} {{ r.chain_number }} · Top Rope?"{% endif %}>{{ '✓ ' if r.rank >= 1 }}Top Rope</button>
+      {% if r.rank == 1 %}formaction="{{ undo }}" data-confirm="Zrušit zápis {{ label }} · Top Rope?"{% endif %}>{{ '✓ ' if r.rank >= 1 }}Top Rope</button>
     <button name="style" value="na prvním" class="log {{ 'done' if r.rank == 2 }}"
-      {% if r.rank == 2 %}formaction="{{ undo }}" data-confirm="Zrušit zápis {{ r.color }} {{ r.chain_number }} · Lead?"{% endif %}>{{ '✓ ' if r.rank == 2 }}Lead</button>
+      {% if r.rank == 2 %}formaction="{{ undo }}" data-confirm="Zrušit zápis {{ label }} · Lead?"{% endif %}>{{ '✓ ' if r.rank == 2 }}Lead</button>
+    {% else %}
+    {% set btn = 'Hotovo' if kind == 'traverz' else 'Top' %}
+    <div class="grow">
+      <p class="strong">{{ label }}</p>
+      {% if r.description %}<p class="tiny muted clamp2">{{ r.description }}</p>{% endif %}
+    </div>
+    <span class="tiny strong muted">{{ TRAVERSE_POINTS if kind == 'traverz' else r.points or 0 }} b</span>
+    <button name="style" value="{{ KIND_STYLE[kind] }}" class="log {{ 'done' if r.rank == 2 }}"
+      {% if r.rank == 2 %}formaction="{{ undo }}" data-confirm="Zrušit zápis {{ label }} · {{ btn }}?"{% endif %}>{{ '✓ ' if r.rank == 2 }}{{ btn }}</button>
+    {% endif %}
   </form>
   {% endfor %}
 </div>
@@ -64,6 +79,12 @@
       {% endfor %}
     </div>
   {% endif %}
+  <form method="post" action="{{ url_for('toggle_bonus', child_id=child.id) }}" class="bonus row gap2 mt3">
+    <p class="strong grow">BONUS</p>
+    <input type="number" inputmode="numeric" name="reward" min="1" max="{{ WEEKLY_BONUS_MAX }}" aria-label="Počet bonusových lezíků"
+      value="{{ bonus.reward if bonus else 1 }}" class="reward" {{ 'disabled' if bonus }}>
+    <button class="log {{ 'done' if bonus }}" {% if bonus %}data-confirm="Zrušit tento týdenní bonus?"{% endif %}>{{ '✓ ' if bonus }}Hotovo</button>
+  </form>
 </div>
 
 <h2 class="mt6 row">Historie
@@ -82,12 +103,14 @@
     {% else %}
     <div class="item col">
       <div class="row gap25">
-        <span class="badge"><i class="swatch" style="background: {{ color_hex(h.route_color) }}"></i>{{ h.chain_number or h.grade }}</span>
+        <span class="badge"><i class="swatch" style="background: {{ color_hex(h.route_color) }}"></i>{{ h.chain_number or h.grade or '–' }}</span>
         <div class="grow">
-          <p class="small strong">{{ h.route_color or 'Cesta' }}{% if h.chain_number %} · řetěz {{ h.chain_number }}{% endif %}</p>
+          <p class="small strong">
+            {%- if h.route_name %}{{ h.route_name }}{% if h.route_color %} · {{ h.route_color }}{% endif %}{% else %}{{ h.route_color or 'Cesta' }}{% endif %}
+            {%- if h.chain_number %} · {{ 'řetěz' if h.route_kind == 'cesta' else 'č.' }} {{ h.chain_number }}{% endif %}</p>
           <div class="mt1">{{ style_chip(h.style) }}</div>
         </div>
-        <span class="tiny strong accent">+{{ points_for_style(h.style) }} b</span>
+        <span class="tiny strong accent">+{{ points_for_climb(h) }} b</span>
         <span class="tiny muted">{{ at|date }}</span>
       </div>
       {% if h.note %}<p class="note">{{ h.note }}</p>{% endif %}

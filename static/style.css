@@ -38,11 +38,12 @@ h1.h1sm { font-size: 18px; margin: 0; }
 h2 { font-size: 15px; font-weight: 700; margin-bottom: 10px; }
 button { font: inherit; color: inherit; cursor: pointer; }
 button:disabled { cursor: not-allowed; }
-input:not([type=radio]):not([type=checkbox]) {
+input:not([type=radio]):not([type=checkbox]), textarea {
   width: 100%; font: inherit; font-size: 14px; color: var(--fg);
   background: #fff; border: 1px solid var(--input); border-radius: 12px; padding: 10px 12px; outline: none;
 }
-input:focus { border-color: var(--hl); }
+input:focus, textarea:focus { border-color: var(--hl); }
+textarea { resize: none; }
 [hidden] { display: none !important; }
 
 /* layout */
@@ -216,3 +217,17 @@ details[open] > summary[data-closed]::after { content: attr(data-open); }
 details > summary h2 { margin-bottom: 0; }
 details > summary.row.between { margin-bottom: 10px; }
 .full-link { display: block; width: 100%; padding: 8px; }
+
+/* route kinds, boulder photos, weekly bonus */
+.tabs { display: flex; gap: 6px; }
+.tabs a { flex: 1; text-align: center; border-radius: 12px; padding: 8px 4px; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; border: 1px solid var(--input); background: #fff; color: var(--muted); }
+.tabs a.on { background: var(--cesty); border-color: var(--cesty); color: var(--fg); }
+.thumb { flex-shrink: 0; width: 56px; height: 56px; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; }
+.swatch.blank { visibility: hidden; }
+.colors .no-color { display: grid; place-items: center; color: var(--muted); font-weight: 700; }
+.clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bonus { border-top: 1px solid color-mix(in srgb, var(--hl) 20%, #fff); padding-top: 12px; }
+.bonus .reward { width: 64px !important; }
+.bonus input:disabled { opacity: 0.6; }
+.btn.danger-btn { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, #fff); }

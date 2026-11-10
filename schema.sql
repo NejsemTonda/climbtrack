@@ -22,11 +22,17 @@ CREATE INDEX IF NOT EXISTS idx_children_group ON children(group_id);
 
 CREATE TABLE IF NOT EXISTS routes (
   id TEXT PRIMARY KEY,
-  color TEXT NOT NULL,
-  chain_number INTEGER NOT NULL,
+  color TEXT NOT NULL DEFAULT '',
+  chain_number INTEGER NOT NULL DEFAULT 0,  -- 0 for traverzy and bouldery
   created_at TEXT NOT NULL,
-  UNIQUE (color, chain_number)
+  kind TEXT NOT NULL DEFAULT 'cesta' CHECK (kind IN ('cesta','traverz','boulder')),
+  points INTEGER,                           -- bouldery only
+  name TEXT NOT NULL DEFAULT '',            -- traverzy only
+  photo_path TEXT,                          -- bouldery only, file in PHOTO_DIR
+  description TEXT
 );
+-- same-colour bouldery stay distinct
+CREATE UNIQUE INDEX IF NOT EXISTS routes_non_boulder_identity ON routes (kind, color, chain_number, name) WHERE kind <> 'boulder';
 
 CREATE TABLE IF NOT EXISTS climbs (
   id TEXT PRIMARY KEY,
@@ -38,7 +44,11 @@ CREATE TABLE IF NOT EXISTS climbs (
   grade TEXT NOT NULL DEFAULT '',  -- only old records use it
   style TEXT NOT NULL,
   note TEXT,
-  climbed_at TEXT NOT NULL
+  climbed_at TEXT NOT NULL,
+  route_kind TEXT NOT NULL DEFAULT 'cesta',
+  route_name TEXT,
+  points INTEGER,          -- traverz/boulder points at the time of logging
+  catalog_route_id TEXT    -- traverz/boulder identity, no FK so it survives route removal
 );
 CREATE INDEX IF NOT EXISTS idx_climbs_child ON climbs(child_id);
 CREATE INDEX IF NOT EXISTS idx_climbs_group ON climbs(group_id, climbed_at);
@@ -68,4 +78,15 @@ CREATE TABLE IF NOT EXISTS lezik_completions (
   reward INTEGER NOT NULL,
   completed_at TEXT NOT NULL,
   UNIQUE (child_id, task_id)
+);
+
+
+CREATE TABLE IF NOT EXISTS lezik_weekly_bonuses (
+  id TEXT PRIMARY KEY,
+  child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+  week_start TEXT NOT NULL,  -- Monday, YYYY-MM-DD
+  reward INTEGER NOT NULL CHECK (reward BETWEEN 1 AND 4),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (child_id, week_start)
 );

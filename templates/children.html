@@ -32,14 +32,14 @@
   {% for c in children %}
   {% set s = stats.get(c.id, (0, 0, 0)) %}
   <a class="item press" href="{{ url_for('child_detail', child_id=c.id) }}"
-     data-name="{{ c.first_name|lower }}" data-day="{{ c.weekday or '' }}" data-time="{{ (c.start_time or '')[:5] }}"
+     data-name="{{ c.first_name|lower }}" data-slots="{{ c.slots or '' }}"
      data-level="{{ c.level or 'začátečník' }}" data-count="{{ s[0] }}" data-points="{{ s[1] }}">
     {{ avatar(c.first_name, c.gender, c.level) }}
     <div class="grow">
       <p class="name">{{ c.first_name }}</p>
       <div class="row wrap gap15 mt1">
-        {% if c.weekday %}<span class="chip plain">{{ WEEKDAYS_SHORT[c.weekday] }} {{ c.start_time[:5] }}</span>
-        {% else %}<span class="tiny muted strong">Bez kroužku</span>{% endif %}
+        {% for s in (c.slots or '').split() %}<span class="chip plain">{{ WEEKDAYS_SHORT[s.split('@')[0]|int] }} {{ s.split('@')[1] }}</span>
+        {% else %}<span class="tiny muted strong">Bez kroužku</span>{% endfor %}
         {{ level_chip(c.level) }}
       </div>
     </div>

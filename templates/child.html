@@ -10,7 +10,7 @@
     <div class="grow">
       <h1 class="h1sm">{{ child.first_name }}</h1>
       <p class="tiny muted">
-        {{ WEEKDAYS_CS[child.weekday or 1] }} {% if child.start_time %}{{ child.start_time[:5] }}–{{ child.end_time[:5] }}{% endif %}
+        {% for g in groups if g.id in member %}{{ ', ' if not loop.first }}{{ WEEKDAYS_SHORT[g.weekday] }} {{ g.start_time[:5] }}{% endfor %}
         {%- if child.birth_year %} · {{ this_year() - child.birth_year }} let{% endif %}
         {%- if child.level %} · {{ child.level }}{% endif %}
       </p>
@@ -18,10 +18,28 @@
     <span class="btn small-btn" data-open="Zavřít" data-closed="Upravit"></span>
   </summary>
   <form method="post" class="card mt3 p4 form">
+    <div class="chips lvl-pick" aria-label="Kroužky">
+      {% for g in groups %}
+      <label><input type="checkbox" name="group_id" value="{{ g.id }}" {{ 'checked' if g.id in member }}><span class="grp">{{ WEEKDAYS_SHORT[g.weekday] }} {{ g.start_time[:5] }}</span></label>
+      {% endfor %}
+    </div>
     {{ child_fields(child, 'Uložit změny') }}
     <button class="btn danger-btn full" formaction="{{ url_for('delete_child', child_id=child.id) }}" formnovalidate
       data-confirm="Opravdu odebrat {{ child.first_name }}? Smažou se i jeho cesty, body a lezíci.">Odebrat dítě</button>
   </form>
+  {% if twins %}
+  <form method="post" action="{{ url_for('merge_child', child_id=child.id) }}" class="card mt3 p4 form">
+    <p class="small strong">Stejné dítě zapsané podruhé?</p>
+    <p class="tiny muted">Cesty, lezíky a kroužky se převedou sem a druhý záznam zmizí. Jméno a údaje zůstanou tyto.</p>
+    <select name="other_id" required aria-label="Dítě ke sloučení">
+      <option value="">Vyberte dítě ({{ child.birth_year or 'všechny' }})</option>
+      {% for t in twins %}
+      <option value="{{ t.id }}">{{ t.first_name }} · {% for s in (t.slots or '').split() %}{{ WEEKDAYS_SHORT[s.split('@')[0]|int] }} {{ s.split('@')[1] }} {% endfor %}· leze {{ t.climbing_years }} r.</option>
+      {% endfor %}
+    </select>
+    <button class="btn full" data-confirm="Sloučit vybrané dítě do {{ child.first_name }}? Nejde vrátit zpět.">Sloučit</button>
+  </form>
+  {% endif %}
 </details>
 
 {{ kind_tabs(kind, 'child_detail', child_id=child.id) }}

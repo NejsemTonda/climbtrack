@@ -55,6 +55,7 @@ def main(env_path):
     init_db(conn, seed=False)
     with conn:
         conn.execute("DELETE FROM photos")
+        conn.execute("DELETE FROM child_groups")
         for t in reversed(COLUMNS):
             conn.execute(f"DELETE FROM {t}")
         for t, cols in COLUMNS.items():
@@ -64,6 +65,7 @@ def main(env_path):
             print(f"{t}: {len(data[t])}")
         conn.executemany("INSERT INTO photos VALUES (?,?,?)", photos)
         print(f"photos: {len(photos)}")
+    init_db(conn, seed=False)  # fills child_groups from children.group_id
     print(f"Imported into {DB_PATH}")
 
 

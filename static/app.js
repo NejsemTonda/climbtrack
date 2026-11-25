@@ -126,8 +126,11 @@ if (kids) {
     let shown = 0;
     for (const el of items) {
       const d = el.dataset;
-      const ok = d.name.includes(s) && (!state.day || d.day === state.day) &&
-        (!state.time || d.time === state.time) && (!state.level || d.level === state.level);
+      const slot = (!state.day && !state.time) || d.slots.split(" ").some((x) => {
+        const [day, time] = x.split("@");
+        return (!state.day || day === state.day) && (!state.time || time === state.time);
+      });
+      const ok = d.name.includes(s) && slot && (!state.level || d.level === state.level);
       el.hidden = !ok;
       shown += ok;
     }

@@ -98,3 +98,11 @@ CREATE TABLE IF NOT EXISTS lezik_weekly_bonuses (
   updated_at TEXT NOT NULL,
   UNIQUE (child_id, week_start)
 );
+
+-- a child can attend several groups; children.group_id is kept as the home group (always one of these rows)
+CREATE TABLE IF NOT EXISTS child_groups (
+  child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+  group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  PRIMARY KEY (child_id, group_id)
+);
+CREATE INDEX IF NOT EXISTS idx_child_groups_group ON child_groups(group_id);

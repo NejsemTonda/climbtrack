@@ -128,6 +128,40 @@ for p in ["/cesty?druh=traverz", "/cesty?druh=boulder", f"/skupina/{gid}", "/det
     assert c.get(p).status_code == 200, p
 
 c.post(f"/dite/{cid}/bonus", data={"reward": "2"})
+
+# the same kid entered again on Wednesday under another name; merge it into Anna
+gid2 = re.search(r"/skupina/([\w-]+)", c.get("/?day=3").text).group(1)
+c.post(f"/skupina/{gid2}/deti", data={"first_name": "Ani", "gender": "holka", "birth_year": "2016", "climbing_years": "1"})
+dup = db.execute("SELECT id FROM children WHERE first_name='Ani'").fetchone()[0]
+c.post("/lezik", data={"starts_on": "2026-11-20", "title-0": "X", "reward-0": "2"})
+x = db.execute("SELECT id FROM lezik_tasks WHERE title='X'").fetchone()[0]
+c.post(f"/dite/{cid}/lezik/{x}")
+c.post(f"/dite/{dup}/lezik/{x}")  # done under both records, counts once
+c.post(f"/dite/{dup}/cesta", data={"route_id": rid, "style": "top rope"})  # +2 b
+c.post(f"/dite/{dup}/cesta", data={"route_id": boulders[0][0], "style": "top"})  # Anna has it too, counts once
+c.post(f"/dite/{dup}/bonus", data={"reward": "3"})  # same week as Anna's 2, the bigger one stays
+assert "Ani ·" in c.get(f"/dite/{cid}").text  # offered as a merge candidate (same birth year)
+assert "Sloučeno" in c.post(f"/dite/{cid}/sloucit", data={"other_id": dup}, follow_redirects=True).text
+page = c.get(f"/dite/{cid}").text
+assert "12 b" in page and "8 lezíků" in page, page  # 10 + 2 b; 3 old + 2 X + bonus 3
+assert db.execute("SELECT COUNT(*) FROM children").fetchone()[0] == 1
+assert db.execute("SELECT COUNT(*) FROM climbs WHERE child_id=?", (cid,)).fetchone()[0] == 4
+assert "Anna" in c.get(f"/skupina/{gid2}").text and "Anna" in c.get(f"/skupina/{gid}").text
+assert 'data-slots="1@' in c.get("/deti").text
+kid = {"first_name": "Anna", "gender": "holka", "birth_year": "2016", "climbing_years": "3"}
+assert "aspoň jeden kroužek" in c.post(f"/dite/{cid}", data=kid, follow_redirects=True).text
+c.post(f"/dite/{cid}", data={**kid, "group_id": [gid2]})
+assert db.execute("SELECT group_id FROM child_groups WHERE child_id=?", (cid,)).fetchall() == [(gid2,)]
+assert db.execute("SELECT group_id FROM children").fetchone()[0] == gid2  # home group follows
+# a child added by the old code (no child_groups row) is repaired by init_db
+db.execute("INSERT INTO children (id, group_id, first_name, created_at) VALUES ('old', ?, 'Old', 'now')", (gid,))
+db.commit()
+hc4.init_db(db, seed=False)
+assert db.execute("SELECT group_id FROM child_groups WHERE child_id='old'").fetchall() == [(gid,)]
+db.execute("DELETE FROM children WHERE id='old'")
+db.execute("DELETE FROM child_groups WHERE child_id='old'")
+db.commit()
+
 c.post(f"/dite/{cid}/smazat")
 assert db.execute("SELECT COUNT(*) FROM children").fetchone()[0] == 0
 assert db.execute("SELECT COUNT(*) FROM climbs").fetchone()[0] == 0

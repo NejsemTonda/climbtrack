@@ -103,6 +103,8 @@ def init_db(conn, seed=True):
                 conn.execute("INSERT INTO photos VALUES (?,?,?)", (name, rid, f.read()))
         except FileNotFoundError:
             pass  # stays a broken image, as it was before
+    # also repairs children added by older code, which only sets children.group_id
+    conn.execute("INSERT OR IGNORE INTO child_groups SELECT id, group_id FROM children")
     if seed and not conn.execute("SELECT 1 FROM groups").fetchone():
         names = {1: ["Malí horolezci", "Skalní veverky", "Pokročilí"],
                  2: ["Malí horolezci", "Starteři", "Pokročilí"],
@@ -232,6 +234,12 @@ def child_stats():
     return {i: (len(climbs.get(i, [])), total_points(climbs.get(i, [])), lezik.get(i, 0)) for i in ids}
 
 
+# "1@14:30 3@16:00": weekday@start of each of the child's groups
+CHILD_SLOTS = """(SELECT GROUP_CONCAT(s, ' ') FROM (SELECT g.weekday || '@' || substr(g.start_time, 1, 5) s
+    FROM child_groups cg JOIN groups g ON g.id = cg.group_id WHERE cg.child_id = children.id
+    ORDER BY g.weekday, g.start_time)) slots"""
+
+
 def today_weekday():
     return datetime.now(TZ).isoweekday()  # 1=Mon..7=Sun, groups use 1..4
 
@@ -292,7 +300,8 @@ def index():
 @app.get("/skupina/<group_id>")
 def group_detail(group_id):
     group = q1("SELECT * FROM groups WHERE id=?", group_id) or abort(404)
-    children = q("SELECT * FROM children WHERE group_id=? ORDER BY first_name", group_id)
+    children = q("""SELECT children.* FROM children JOIN child_groups cg ON cg.child_id = children.id
+                    WHERE cg.group_id=? ORDER BY first_name""", group_id)
     climbs = q("""SELECT climbs.*, children.first_name FROM climbs JOIN children ON children.id = climbs.child_id
                   WHERE climbs.group_id=? ORDER BY climbed_at DESC LIMIT 15""", group_id)
     n_climbs = q1("SELECT COUNT(*) n FROM climbs WHERE group_id=?", group_id)["n"]
@@ -305,24 +314,30 @@ def add_child(group_id):
     q1("SELECT 1 FROM groups WHERE id=?", group_id) or abort(404)
     f = child_form()
     if f:
-        run("""INSERT INTO children (id, group_id, first_name, gender, birth_year, climbing_years, level, created_at)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            new_id(), group_id, f["first_name"], f["gender"], f["birth_year"], f["climbing_years"], f["level"], now_iso())
+        cid = new_id()
+        with db() as conn:
+            conn.execute("""INSERT INTO children (id, group_id, first_name, gender, birth_year, climbing_years, level, created_at)
+                            VALUES (?,?,?,?,?,?,?,?)""",
+                         (cid, group_id, f["first_name"], f["gender"], f["birth_year"], f["climbing_years"], f["level"], now_iso()))
+            conn.execute("INSERT INTO child_groups VALUES (?,?)", (cid, group_id))
         flash("Dítě přidáno")
     return redirect(url_for("group_detail", group_id=group_id))
 
 
 @app.get("/deti")
 def children_page():
-    children = q("""SELECT children.*, groups.weekday, groups.start_time FROM children
-                    LEFT JOIN groups ON groups.id = children.group_id ORDER BY first_name""")
+    children = q(f"SELECT children.*, {CHILD_SLOTS} FROM children ORDER BY first_name")
     return render_template("children.html", children=children, stats=child_stats())
 
 
 @app.get("/dite/<child_id>")
 def child_detail(child_id):
-    child = q1("""SELECT children.*, groups.weekday, groups.start_time, groups.end_time FROM children
-                  LEFT JOIN groups ON groups.id = children.group_id WHERE children.id=?""", child_id) or abort(404)
+    child = q1("SELECT * FROM children WHERE id=?", child_id) or abort(404)
+    groups = q("SELECT * FROM groups ORDER BY weekday, start_time")
+    member = {r["group_id"] for r in q("SELECT group_id FROM child_groups WHERE child_id=?", child_id)}
+    # merge candidates: the birth year is reliable, names and climbing years are not
+    twins = q(f"""SELECT children.*, {CHILD_SLOTS} FROM children WHERE id<>? AND (birth_year=? OR ? IS NULL)
+                  ORDER BY first_name""", child_id, child["birth_year"], child["birth_year"])
     climbs = q("SELECT * FROM climbs WHERE child_id=? ORDER BY climbed_at DESC", child_id)
     done = q("SELECT * FROM lezik_completions WHERE child_id=? ORDER BY completed_at DESC", child_id)
     bonuses = q("SELECT * FROM lezik_weekly_bonuses WHERE child_id=?", child_id)
@@ -358,7 +373,7 @@ def child_detail(child_id):
                           for b in bonuses]
     history = sorted([("climb", c["climbed_at"], c) for c in climbs] + [("lezik", d["completed_at"], d) for d in lezik],
                      key=lambda h: h[1], reverse=True)
-    return render_template("child.html", child=child, routes=routes, kind=kind, tasks=tasks, challenge=challenge,
+    return render_template("child.html", child=child, groups=groups, member=member, twins=twins, routes=routes, kind=kind, tasks=tasks, challenge=challenge,
                            done_in_challenge=done_in_challenge, history=history, bonus=bonus,
                            points=total_points(climbs), lezik_total=sum(d["reward"] for d in lezik))
 
@@ -369,6 +384,30 @@ def delete_child(child_id):
     run("DELETE FROM children WHERE id=?", child_id)  # climbs, lezíky and bonuses cascade
     flash("Dítě odebráno")
     return redirect(url_for("group_detail", group_id=child["group_id"]))
+
+
+@app.post("/dite/<child_id>/sloucit")
+def merge_child(child_id):
+    """Fold a duplicate record (the same kid entered in another group) into this child, then delete it."""
+    child = q1("SELECT * FROM children WHERE id=?", child_id) or abort(404)
+    other = request.form.get("other_id", "")
+    if other == child_id or not q1("SELECT 1 FROM children WHERE id=?", other):
+        flash("Vyberte dítě ke sloučení", "error")
+        return redirect(url_for("child_detail", child_id=child_id))
+    with db() as conn:
+        conn.execute("UPDATE climbs SET child_id=? WHERE child_id=?", (child_id, other))  # total_points dedups routes
+        # a task done under both records counts once
+        conn.execute("UPDATE OR IGNORE lezik_completions SET child_id=? WHERE child_id=?", (child_id, other))
+        # one bonus per week: keep the bigger one
+        conn.execute("""UPDATE lezik_weekly_bonuses SET reward = MAX(reward, (SELECT o.reward FROM lezik_weekly_bonuses o
+                            WHERE o.child_id=? AND o.week_start = lezik_weekly_bonuses.week_start))
+                        WHERE child_id=? AND week_start IN (SELECT week_start FROM lezik_weekly_bonuses WHERE child_id=?)""",
+                     (other, child_id, other))
+        conn.execute("UPDATE OR IGNORE lezik_weekly_bonuses SET child_id=? WHERE child_id=?", (child_id, other))
+        conn.execute("INSERT OR IGNORE INTO child_groups SELECT ?, group_id FROM child_groups WHERE child_id=?", (child_id, other))
+        conn.execute("DELETE FROM children WHERE id=?", (other,))  # the skipped duplicates cascade
+    flash(f"Sloučeno do {child['first_name']}")
+    return redirect(url_for("child_detail", child_id=child_id))
 
 
 @app.post("/dite/<child_id>/bonus")
@@ -391,11 +430,20 @@ def toggle_bonus(child_id):
 
 @app.post("/dite/<child_id>")
 def edit_child(child_id):
-    q1("SELECT 1 FROM children WHERE id=?", child_id) or abort(404)
+    child = q1("SELECT * FROM children WHERE id=?", child_id) or abort(404)
     f = child_form()
-    if f:
-        run("UPDATE children SET first_name=?, gender=?, birth_year=?, climbing_years=?, level=? WHERE id=?",
-            f["first_name"], f["gender"], f["birth_year"], f["climbing_years"], f["level"], child_id)
+    picked = request.form.getlist("group_id")
+    gids = [r["id"] for r in q("SELECT id FROM groups ORDER BY weekday, start_time") if r["id"] in picked]
+    if f and not gids:
+        flash("Vyberte aspoň jeden kroužek", "error")
+    elif f:
+        home = child["group_id"] if child["group_id"] in gids else gids[0]  # home group stays one of child_groups
+        with db() as conn:
+            conn.execute("""UPDATE children SET first_name=?, gender=?, birth_year=?, climbing_years=?, level=?, group_id=?
+                            WHERE id=?""",
+                         (f["first_name"], f["gender"], f["birth_year"], f["climbing_years"], f["level"], home, child_id))
+            conn.execute("DELETE FROM child_groups WHERE child_id=?", (child_id,))
+            conn.executemany("INSERT INTO child_groups VALUES (?,?)", [(child_id, g) for g in gids])
         flash("Údaje upraveny")
     return redirect(url_for("child_detail", child_id=child_id))
 
@@ -410,6 +458,10 @@ def log_climb(child_id):
         return redirect(url_for("child_detail", child_id=child_id))
     kind = route["kind"]
     url = url_for("child_detail", child_id=child_id, druh=kind)
+    # the climb goes to the child's group for today, else to the home group
+    today = q1("""SELECT g.id FROM child_groups cg JOIN groups g ON g.id = cg.group_id
+                  WHERE cg.child_id=? AND g.weekday=? ORDER BY g.start_time""", child_id, today_weekday())
+    group_id = today["id"] if today else child["group_id"]
     if kind == "cesta":
         prev = {r["style"] for r in q("""SELECT style FROM climbs WHERE child_id=? AND route_kind='cesta'
                                          AND route_color=? AND chain_number=?""",
@@ -425,7 +477,7 @@ def log_climb(child_id):
         run("""INSERT INTO climbs (id, child_id, group_id, route_id, route_color, chain_number, style, climbed_at,
                                    route_kind, route_name, points, catalog_route_id)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            new_id(), child_id, child["group_id"], route["id"], route["color"], route["chain_number"], style, now_iso(),
+            new_id(), child_id, group_id, route["id"], route["color"], route["chain_number"], style, now_iso(),
             kind, route["name"] or None, points, route["id"] if kind != "cesta" else None)
         label = {"na prvním": "Lead", "top rope": "Top Rope", "hotovo": "Hotovo", "top": "Top"}[style]
         flash(f"{route_label(route)} · {label} zapsáno")

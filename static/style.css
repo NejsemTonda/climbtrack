@@ -38,7 +38,7 @@ h1.h1sm { font-size: 18px; margin: 0; }
 h2 { font-size: 15px; font-weight: 700; margin-bottom: 10px; }
 button { font: inherit; color: inherit; cursor: pointer; }
 button:disabled { cursor: not-allowed; }
-input:not([type=radio]):not([type=checkbox]), textarea {
+input:not([type=radio]):not([type=checkbox]), textarea, select {
   width: 100%; font: inherit; font-size: 14px; color: var(--fg);
   background: #fff; border: 1px solid var(--input); border-radius: 12px; padding: 10px 12px; outline: none;
 }
@@ -189,6 +189,7 @@ input:focus-visible + span { outline: 2px solid var(--hl); outline-offset: 2px; 
 .chips button, .lvl-pick span { flex-shrink: 0; border: 1px solid var(--border); background: #fff; color: var(--muted); border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 700; cursor: pointer; }
 .lvl-pick { flex-wrap: wrap; }
 .lvl-pick span { padding: 4px 10px; font-size: 11px; }
+.lvl-pick input:checked + .grp { background: var(--hl); border-color: var(--hl); color: #fff; }
 .chips button.on { background: var(--deti); border-color: var(--deti); color: #fff; }
 [data-filter=sort] button.on { background: var(--hl); border-color: var(--hl); }
 .chips button.on.lvl-beginner, .lvl-pick input:checked + .lvl-beginner { background: var(--lvl-beginner); border-color: var(--lvl-beginner); color: #fff; }

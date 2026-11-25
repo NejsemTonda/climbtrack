@@ -15,9 +15,9 @@ Environment:
 - `APP_PASSWORD` — if set, the whole app asks for it (HTTP basic auth, any username). Unset = open to anyone with the link, like the original.
 - `SECRET_KEY` — set a fixed value in production (it signs the flash-message cookie).
 - `HC4_DB` — database path (default `./hc4.db`).
-- `HC4_PHOTOS` — boulder photo folder (default `boulder-photos/` next to the database).
+- `HC4_PHOTOS` — old boulder photo folder (default `boulder-photos/` next to the database). Photos are now stored in the database; `init-db` copies any files from this folder in once.
 
 Production: run behind any WSGI server, e.g. `pip install gunicorn && gunicorn -w 2 app:app`, with HTTPS in front if you use `APP_PASSWORD`.
-Backup = copy `hc4.db` and the photo folder.
+Backup = copy `hc4.db` (photos included).
 
 Hosting on lezik.cz (Caddy, systemd, `lezik` management command): see [`deploy/README.md`](deploy/README.md).

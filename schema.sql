@@ -28,11 +28,19 @@ CREATE TABLE IF NOT EXISTS routes (
   kind TEXT NOT NULL DEFAULT 'cesta' CHECK (kind IN ('cesta','traverz','boulder')),
   points INTEGER,                           -- bouldery only
   name TEXT NOT NULL DEFAULT '',            -- traverzy only
-  photo_path TEXT,                          -- bouldery only, file in PHOTO_DIR
+  photo_path TEXT,                          -- bouldery only, name of the row in photos
   description TEXT
 );
 -- same-colour bouldery stay distinct
 CREATE UNIQUE INDEX IF NOT EXISTS routes_non_boulder_identity ON routes (kind, color, chain_number, name) WHERE kind <> 'boulder';
+
+-- boulder photos, kept apart so SELECT * FROM routes doesn't load image bytes
+CREATE TABLE IF NOT EXISTS photos (
+  name TEXT PRIMARY KEY,  -- <uuid>.<jpg|png|webp>, used in the /foto/ URL
+  route_id TEXT NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+  data BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_photos_route ON photos(route_id);
 
 CREATE TABLE IF NOT EXISTS climbs (
   id TEXT PRIMARY KEY,

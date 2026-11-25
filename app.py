@@ -6,15 +6,17 @@ from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
-from flask import Flask, abort, flash, g, redirect, render_template, request, send_from_directory, url_for
+from flask import Flask, abort, flash, g, redirect, render_template, request, url_for
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("HC4_DB", os.path.join(APP_DIR, "hc4.db"))
+# Old photo folder; only read once by init_db to move its files into the photos table.
 PHOTO_DIR = os.environ.get("HC4_PHOTOS", os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "boulder-photos"))
 TZ = ZoneInfo("Europe/Prague")
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32)
+PHOTO_TYPES = {"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
 PHOTO_MAX_BYTES = 10 * 1024 * 1024
 app.config["MAX_CONTENT_LENGTH"] = PHOTO_MAX_BYTES + 64 * 1024  # photo + form fields
 
@@ -94,6 +96,13 @@ def init_db(conn, seed=True):
     for col in ("route_kind TEXT NOT NULL DEFAULT 'cesta'", "route_name TEXT", "points INTEGER", "catalog_route_id TEXT"):
         if col.split()[0] not in table_cols(conn, "climbs"):
             conn.execute(f"ALTER TABLE climbs ADD COLUMN {col}")
+    for rid, name in conn.execute("""SELECT id, photo_path FROM routes WHERE photo_path IS NOT NULL
+                                     AND photo_path NOT IN (SELECT name FROM photos)""").fetchall():
+        try:  # files are left on disk, so a code rollback still finds them
+            with open(os.path.join(PHOTO_DIR, os.path.basename(name)), "rb") as f:
+                conn.execute("INSERT INTO photos VALUES (?,?,?)", (name, rid, f.read()))
+        except FileNotFoundError:
+            pass  # stays a broken image, as it was before
     if seed and not conn.execute("SELECT 1 FROM groups").fetchone():
         names = {1: ["Malí horolezci", "Skalní veverky", "Pokročilí"],
                  2: ["Malí horolezci", "Starteři", "Pokročilí"],
@@ -173,14 +182,6 @@ def photo_ext(data):
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "webp"
     return None
-
-
-def remove_photo(path):
-    if path:
-        try:
-            os.remove(os.path.join(PHOTO_DIR, os.path.basename(path)))
-        except FileNotFoundError:
-            pass
 
 
 def level_for_years(years):
@@ -506,33 +507,29 @@ def add_route(kind):
                                   kind, color, n, name):
         flash("Toto už v seznamu je", "error")
     else:
-        path = None
-        if data:
-            os.makedirs(PHOTO_DIR, exist_ok=True)
-            path = f"{uuid.uuid4()}.{ext}"
-            with open(os.path.join(PHOTO_DIR, path), "wb") as f:
-                f.write(data)
-        try:
-            run("""INSERT INTO routes (id, color, chain_number, created_at, kind, points, name, photo_path, description)
-                   VALUES (?,?,?,?,?,?,?,?,?)""", new_id(), color, n, now_iso(), kind, pts, name, path, desc or None)
-        except sqlite3.Error:
-            remove_photo(path)
-            raise
+        rid, path = new_id(), f"{uuid.uuid4()}.{ext}" if data else None
+        with db() as conn:
+            conn.execute("""INSERT INTO routes (id, color, chain_number, created_at, kind, points, name, photo_path, description)
+                            VALUES (?,?,?,?,?,?,?,?,?)""", (rid, color, n, now_iso(), kind, pts, name, path, desc or None))
+            if data:
+                conn.execute("INSERT INTO photos VALUES (?,?,?)", (path, rid, data))
         flash("Přidáno")
 
 
 @app.post("/cesty/<route_id>/smazat")
 def delete_route(route_id):
     route = q1("SELECT * FROM routes WHERE id=?", route_id) or abort(404)
-    run("DELETE FROM routes WHERE id=?", route_id)  # climbs keep color + chain / catalog id, route_id becomes NULL
-    remove_photo(route["photo_path"])
+    run("DELETE FROM routes WHERE id=?", route_id)  # photo cascades; climbs keep color + chain / catalog id, route_id -> NULL
     flash("Odebráno")
     return redirect(url_for("routes_page", druh=route["kind"]))
 
 
 @app.get("/foto/<name>")
 def photo(name):
-    return send_from_directory(PHOTO_DIR, name, max_age=30 * 24 * 3600)  # names are random uuids, never reused
+    row = q1("SELECT data FROM photos WHERE name=?", name) or abort(404)
+    resp = app.response_class(row["data"], mimetype=PHOTO_TYPES.get(name.rsplit(".", 1)[-1], "application/octet-stream"))
+    resp.cache_control.max_age = 30 * 24 * 3600  # names are random uuids, never reused
+    return resp
 
 
 def task_rows():

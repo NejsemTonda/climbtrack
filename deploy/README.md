@@ -17,8 +17,7 @@ Layout of `/home/climbtrack`:
 ```
 app/              this repo (deploy-only checkout) + .venv
 data/hc4.db       live database — outside the repo, so deploys only migrate it (`flask init-db`)
-data/boulder-photos/  uploaded boulder photos (HC4_PHOTOS)
-data/backups/     backups (database snapshots + a copy of boulder-photos/)
+data/backups/     database snapshots (boulder photos are inside the database)
 env               settings, see env.example
 .local/bin/lezik  installed copy of deploy/lezik
 ```

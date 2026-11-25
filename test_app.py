@@ -109,8 +109,11 @@ for rid_, st in [(boulders[0][0], "top"), (boulders[1][0], "top"), (trav, "hotov
 assert "už má zapsané" in c.post(f"/dite/{cid}/cesta", data={"route_id": trav, "style": "hotovo"}, follow_redirects=True).text
 assert c.post(f"/dite/{cid}/cesta", data={"route_id": trav, "style": "na prvním"}, follow_redirects=True).text.count("Vyberte cestu")
 assert "15 b" in c.get(f"/dite/{cid}?druh=boulder").text
+assert c.get(f"/foto/{boulders[1][2]}").headers["Content-Type"] == "image/png"
+assert db.execute("SELECT COUNT(*) FROM photos").fetchone()[0] == 1
+assert not os.path.exists(hc4.PHOTO_DIR)  # photos live only in the database
 c.post(f"/cesty/{boulders[1][0]}/smazat")  # removing the boulder keeps the child's points and deletes the photo
-assert not os.path.exists(os.path.join(hc4.PHOTO_DIR, boulders[1][2]))
+assert db.execute("SELECT COUNT(*) FROM photos").fetchone()[0] == 0
 assert "15 b" in c.get(f"/dite/{cid}?druh=traverz").text
 c.post(f"/dite/{cid}/cesta/zrusit", data={"route_id": trav})
 assert "10 b" in c.get(f"/dite/{cid}").text
@@ -146,4 +149,15 @@ assert {r[2] for r in old.execute("PRAGMA foreign_key_list(climbs)")} == {"route
 old.execute("INSERT INTO routes (id, color, chain_number, created_at, kind) VALUES ('r2', 'modrá', 0, 'now', 'boulder')")
 old.execute("INSERT INTO routes (id, color, chain_number, created_at, kind) VALUES ('r3', 'modrá', 0, 'now', 'boulder')")
 hc4.init_db(old, seed=False)  # idempotent
+
+# migration of photo files into the photos table; a missing file is skipped
+os.makedirs(hc4.PHOTO_DIR)
+with open(os.path.join(hc4.PHOTO_DIR, "f.png"), "wb") as f:
+    f.write(png)
+db.execute("INSERT INTO routes (id, created_at, kind, photo_path) VALUES ('rf', 'now', 'boulder', 'f.png'), ('rg', 'now', 'boulder', 'gone.png')")
+db.commit()
+hc4.init_db(db, seed=False)
+hc4.init_db(db, seed=False)  # idempotent
+assert db.execute("SELECT name, route_id FROM photos").fetchall() == [("f.png", "rf")]
+assert c.get("/foto/f.png").data == png and c.get("/foto/gone.png").status_code == 404
 print("ok v3")

@@ -4,7 +4,6 @@
 set -euo pipefail
 SRC="$HOME/app"
 DB="$HOME/data/hc4.db"
-PHOTOS="$HOME/data/boulder-photos"
 BACKUPS="$HOME/data/backups"
 KEEP=30
 PORT=3100
@@ -18,8 +17,6 @@ backup() {
   local f="$BACKUPS/hc4-$(date +%Y%m%d-%H%M%S).db"
   python3 -I -c 'import sqlite3,sys; s=sqlite3.connect(sys.argv[1]); d=sqlite3.connect(sys.argv[2]); s.backup(d); d.close()' "$DB" "$f"
   ls -1t "$BACKUPS"/hc4-*.db | tail -n +$((KEEP + 1)) | xargs -r rm --
-  # photos never change once uploaded, so one growing copy is enough (removed boulders' photos stay in it)
-  [ ! -d "$PHOTOS" ] || cp -rn "$PHOTOS" "$BACKUPS/"
   echo "Backup: $f"
 }
 

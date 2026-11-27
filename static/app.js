@@ -118,7 +118,7 @@ document.querySelectorAll(".task-rows").forEach((box) => {
 // Děti: live search, filters and sorting.
 const kids = document.getElementById("kids");
 if (kids) {
-  const state = { day: "", time: "", level: "", sort: "" };
+  const state = { day: "", time: "", level: "", gender: "", sort: "" };
   const search = document.getElementById("search");
   const items = [...kids.querySelectorAll("a.item")];
   const apply = () => {
@@ -130,7 +130,8 @@ if (kids) {
         const [day, time] = x.split("@");
         return (!state.day || day === state.day) && (!state.time || time === state.time);
       });
-      const ok = d.name.includes(s) && slot && (!state.level || d.level === state.level);
+      const ok = d.name.includes(s) && slot && (!state.level || d.level === state.level) &&
+        (!state.gender || d.gender === state.gender);
       el.hidden = !ok;
       shown += ok;
     }
@@ -140,7 +141,7 @@ if (kids) {
     // Array.sort is stable, so equal values keep the server's name order.
     const sorted = key ? [...items].sort((a, b) => dir * (a.dataset[key] - b.dataset[key])) : items;
     kids.prepend(...sorted);
-    const n = ["day", "time", "level", "sort"].filter((k) => state[k]).length;
+    const n = ["day", "time", "level", "gender", "sort"].filter((k) => state[k]).length;
     document.getElementById("filter-count").textContent = n || "";
   };
   document.querySelectorAll("[data-filter]").forEach((group) =>
